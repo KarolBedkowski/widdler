@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"text/template"
@@ -86,6 +88,7 @@ var (
 	users      map[string]string
 	version    bool
 	build      string
+	numBackups int
 )
 
 var pledges = "stdio wpath rpath cpath tty inet dns unveil"
@@ -105,6 +108,7 @@ func init() {
 	flag.StringVar(&auth, "auth", "basic", "Enable HTTP Basic Authentication.")
 	flag.BoolVar(&genHtpass, "gen", false, "Generate a .htpasswd file or add a new entry to an existing file.")
 	flag.BoolVar(&version, "v", false, "Show version and exit.")
+	flag.IntVar(&numBackups, "backups", 0, "Create backup written files up to given number of files.")
 	flag.Parse()
 
 	// These are OpenBSD specific protections used to prevent unnecessary file access.
@@ -155,6 +159,67 @@ func createEmpty(path string) error {
 		if wErr != nil {
 			return wErr
 		}
+	}
+	return nil
+}
+
+func deleteOldBackups(fileBase string) {
+	files, err := filepath.Glob(fileBase + "-*")
+	if err != nil {
+		fmt.Printf("delete old backups error: %v\n", err)
+		return
+	}
+
+	if len(files) <= numBackups {
+		return
+	}
+	sort.Strings(files)
+
+	toDel := files[:len(files)-numBackups]
+	for _, fname := range toDel {
+		fmt.Printf("delete %s\n", fname)
+		os.Remove(fname)
+	}
+}
+
+func createBackup(path, backupPath string) error {
+	_, fErr := os.Stat(path)
+	if fErr == nil {
+		now := time.Now().Format("2006010_2150405")
+		ext := filepath.Ext(backupPath)
+		base := backupPath[0 : len(backupPath)-len(ext)]
+		dstFilename := base + "-" + now + ext
+
+		backupDir, _ := filepath.Split(dstFilename)
+		_, dErr := os.Stat(backupDir)
+		if os.IsNotExist(dErr) {
+			mErr := os.MkdirAll(backupDir, 0o700)
+			if mErr != nil {
+				return mErr
+			}
+		}
+
+		log.Printf("backup %s -> %s\n", path, backupPath)
+
+		source, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer source.Close()
+
+		destination, err := os.Create(dstFilename)
+		if err != nil {
+			return err
+		}
+		defer destination.Close()
+
+		_, err = io.Copy(destination, source)
+		if err != nil {
+			return err
+		}
+
+		deleteOldBackups(base)
+
 	}
 	return nil
 }
@@ -359,6 +424,14 @@ func main() {
 				log.Println(err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
+			}
+			if r.Method == "PUT" && numBackups > 0 {
+				backupDir := path.Join(davDir, user, "backups")
+				if err := createBackup(fullPath, filepath.Clean(path.Join(backupDir, r.URL.Path))); err != nil {
+					log.Println(err)
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 			}
 			handler.dav.ServeHTTP(w, r)
 		} else {
