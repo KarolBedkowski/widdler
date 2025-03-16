@@ -399,8 +399,13 @@ func main() {
 
 		defer handler.mu.Unlock()
 
-		userPath := path.Join(davDir, user)
+		userPath := filepath.Clean(path.Join(davDir, user))
 		fullPath := path.Join(davDir, user, r.URL.Path)
+		fullPath = filepath.Clean(fullPath)
+		if !strings.HasPrefix(fullPath, userPath) {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
 
 		_, dErr := os.Stat(userPath)
 		if os.IsNotExist(dErr) {
