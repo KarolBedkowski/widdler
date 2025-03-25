@@ -88,7 +88,9 @@ var (
 	users      map[string]string
 	version    bool
 	build      string
-	numBackups int
+
+	numBackups   int
+	minBackupAge int
 )
 
 var pledges = "stdio wpath rpath cpath tty inet dns unveil"
@@ -109,6 +111,7 @@ func init() {
 	flag.BoolVar(&genHtpass, "gen", false, "Generate a .htpasswd file or add a new entry to an existing file.")
 	flag.BoolVar(&version, "v", false, "Show version and exit.")
 	flag.IntVar(&numBackups, "backups", 0, "Create backup written files up to given number of files.")
+	flag.IntVar(&minBackupAge, "backup-age", 60, "Minimal time between backups (in seconds)")
 	flag.Parse()
 
 	// These are OpenBSD specific protections used to prevent unnecessary file access.
@@ -182,45 +185,60 @@ func deleteOldBackups(fileBase string) {
 	}
 }
 
+var backupsAge = make(map[string]time.Time)
+
 func createBackup(path, backupPath string) error {
 	_, fErr := os.Stat(path)
-	if fErr == nil {
-		now := time.Now().Format("2006010_2150405")
-		ext := filepath.Ext(backupPath)
-		base := backupPath[0 : len(backupPath)-len(ext)]
-		dstFilename := base + "-" + now + ext
+	if fErr != nil {
+		return nil
+	}
 
-		backupDir, _ := filepath.Split(dstFilename)
-		_, dErr := os.Stat(backupDir)
-		if os.IsNotExist(dErr) {
-			mErr := os.MkdirAll(backupDir, 0o700)
-			if mErr != nil {
-				return mErr
+	now := time.Now()
+
+	if minBackupAge > 0 {
+		if oldBackupTs, ok := backupsAge[path]; ok {
+			if now.Sub(oldBackupTs) < time.Duration(minBackupAge)*time.Second {
+				return nil
 			}
 		}
 
-		log.Printf("backup %s -> %s\n", path, backupPath)
-
-		source, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer source.Close()
-
-		destination, err := os.Create(dstFilename)
-		if err != nil {
-			return err
-		}
-		defer destination.Close()
-
-		_, err = io.Copy(destination, source)
-		if err != nil {
-			return err
-		}
-
-		deleteOldBackups(base)
-
+		backupsAge[path] = now
 	}
+
+	ext := filepath.Ext(backupPath)
+	base := backupPath[0 : len(backupPath)-len(ext)]
+	dstFilename := base + "-" + now.Format("2006010_2150405") + ext
+
+	backupDir, _ := filepath.Split(dstFilename)
+	_, dErr := os.Stat(backupDir)
+	if os.IsNotExist(dErr) {
+		mErr := os.MkdirAll(backupDir, 0o700)
+		if mErr != nil {
+			return mErr
+		}
+	}
+
+	log.Printf("backup %s -> %s\n", path, backupPath)
+
+	source, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	destination, err := os.Create(dstFilename)
+	if err != nil {
+		return err
+	}
+	defer destination.Close()
+
+	_, err = io.Copy(destination, source)
+	if err != nil {
+		return err
+	}
+
+	deleteOldBackups(base)
+
 	return nil
 }
 
