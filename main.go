@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"crypto/tls"
 	"embed"
 	"encoding/csv"
@@ -89,8 +90,9 @@ var (
 	version    bool
 	build      string
 
-	numBackups   int
-	minBackupAge int
+	numBackups      int
+	minBackupAge    int
+	compressBackups bool
 )
 
 var pledges = "stdio wpath rpath cpath tty inet dns unveil"
@@ -112,6 +114,7 @@ func init() {
 	flag.BoolVar(&version, "v", false, "Show version and exit.")
 	flag.IntVar(&numBackups, "backups", 0, "Create backup written files up to given number of files.")
 	flag.IntVar(&minBackupAge, "backup-age", 60, "Minimal time between backups (in seconds)")
+	flag.BoolVar(&compressBackups, "backup-compress", false, "GZIP backup files.")
 	flag.Parse()
 
 	// These are OpenBSD specific protections used to prevent unnecessary file access.
@@ -209,6 +212,10 @@ func createBackup(path, backupPath string) error {
 	base := backupPath[0 : len(backupPath)-len(ext)]
 	dstFilename := base + "-" + now.Format("2006010_2150405") + ext
 
+	if compressBackups {
+		dstFilename += ".gz"
+	}
+
 	backupDir, _ := filepath.Split(dstFilename)
 	_, dErr := os.Stat(backupDir)
 	if os.IsNotExist(dErr) {
@@ -226,12 +233,20 @@ func createBackup(path, backupPath string) error {
 	}
 	defer source.Close()
 
-	destination, err := os.Create(dstFilename)
+	var destination io.WriteCloser
+
+	destination, err = os.Create(dstFilename)
 	if err != nil {
 		return err
 	}
 	defer destination.Close()
 
+	if compressBackups {
+		destination, err = gzip.NewWriterLevel(destination, gzip.BestCompression)
+		if err != nil {
+			return err
+		}
+	}
 	_, err = io.Copy(destination, source)
 	if err != nil {
 		return err
@@ -298,7 +313,7 @@ func main() {
 			log.Fatalln(err)
 		}
 
-		f, err := os.OpenFile(filepath.Clean(passPath), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+		f, err := os.OpenFile(filepath.Clean(passPath), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err != nil {
 			log.Fatalln(err)
 		}
