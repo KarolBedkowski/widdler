@@ -161,7 +161,7 @@ func createEmpty(path string) error {
 	if os.IsNotExist(fErr) {
 		log.Printf("creating %q\n", path)
 		twData, _ := tiddly.ReadFile(twFile)
-		wErr := os.WriteFile(path, twData, 0600)
+		wErr := os.WriteFile(path, twData, 0o600)
 		if wErr != nil {
 			return wErr
 		}
@@ -183,7 +183,7 @@ func deleteOldBackups(fileBase string) {
 
 	toDel := files[:len(files)-numBackups]
 	for _, fname := range toDel {
-		fmt.Printf("delete %s\n", fname)
+		fmt.Printf("delete old backup: %s\n", fname)
 		os.Remove(fname)
 	}
 }
@@ -191,8 +191,7 @@ func deleteOldBackups(fileBase string) {
 var backupsAge = make(map[string]time.Time)
 
 func createBackup(path, backupPath string) error {
-	_, fErr := os.Stat(path)
-	if fErr != nil {
+	if _, err := os.Stat(path); err != nil {
 		return nil
 	}
 
@@ -217,11 +216,9 @@ func createBackup(path, backupPath string) error {
 	}
 
 	backupDir, _ := filepath.Split(dstFilename)
-	_, dErr := os.Stat(backupDir)
-	if os.IsNotExist(dErr) {
-		mErr := os.MkdirAll(backupDir, 0o700)
-		if mErr != nil {
-			return mErr
+	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(backupDir, 0o700); err != nil {
+			return fmt.Errorf("create backup dir %s error: %w", backupDir, err)
 		}
 	}
 
@@ -229,7 +226,7 @@ func createBackup(path, backupPath string) error {
 
 	source, err := os.Open(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("open %s for backup error: %w", path, err)
 	}
 	defer source.Close()
 
@@ -237,19 +234,18 @@ func createBackup(path, backupPath string) error {
 
 	destination, err = os.Create(dstFilename)
 	if err != nil {
-		return err
+		return fmt.Errorf("create backup file %s error: %w", dstFilename, err)
 	}
 	defer destination.Close()
 
 	if compressBackups {
 		destination, err = gzip.NewWriterLevel(destination, gzip.BestCompression)
 		if err != nil {
-			return err
+			return fmt.Errorf("create gzip writer error: %w", err)
 		}
 	}
-	_, err = io.Copy(destination, source)
-	if err != nil {
-		return err
+	if _, err = io.Copy(destination, source); err != nil {
+		return fmt.Errorf("create backup file error: %w", err)
 	}
 
 	deleteOldBackups(base)
@@ -283,6 +279,7 @@ func addHandler(u, uPath string) {
 			LockSystem: webdav.NewMemLS(),
 			FileSystem: webdav.Dir(uPath),
 			Logger: func(r *http.Request, err error) {
+				// log.Print(r)
 				if err != nil {
 					log.Print(err)
 				}
@@ -402,7 +399,7 @@ func main() {
 				return
 			}
 		} else if auth == "header" {
-			var prefix = "Auth"
+			prefix := "Auth"
 			for name, values := range r.Header {
 				if strings.HasPrefix(name, prefix) {
 					user = strings.TrimLeft(name, prefix)
@@ -442,7 +439,7 @@ func main() {
 
 		_, dErr := os.Stat(userPath)
 		if os.IsNotExist(dErr) {
-			mErr := os.Mkdir(userPath, 0700)
+			mErr := os.Mkdir(userPath, 0o700)
 			if mErr != nil {
 				http.Error(w, mErr.Error(), http.StatusInternalServerError)
 				return
