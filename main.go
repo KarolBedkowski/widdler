@@ -90,6 +90,8 @@ var (
 	version    bool
 	build      string
 
+	createBackups   bool
+	backupsDir      string
 	numBackups      int
 	minBackupAge    int
 	compressBackups bool
@@ -112,9 +114,12 @@ func init() {
 	flag.StringVar(&auth, "auth", "basic", "Enable HTTP Basic Authentication.")
 	flag.BoolVar(&genHtpass, "gen", false, "Generate a .htpasswd file or add a new entry to an existing file.")
 	flag.BoolVar(&version, "v", false, "Show version and exit.")
-	flag.IntVar(&numBackups, "backups", 0, "Create backup written files up to given number of files.")
-	flag.IntVar(&minBackupAge, "backup-age", 60, "Minimal time between backups (in seconds)")
-	flag.BoolVar(&compressBackups, "backup-compress", false, "GZIP backup files.")
+
+	flag.BoolVar(&createBackups, "backups", false, "Create backup written files.")
+	flag.StringVar(&backupsDir, "backups.dir", "", "Directory for backups. Default `<wikis>/<user>/backups")
+	flag.IntVar(&numBackups, "backups.files", 10, "Maximum number of backup each file.")
+	flag.IntVar(&minBackupAge, "backup.age", 60, "Minimal time between backups (in seconds)")
+	flag.BoolVar(&compressBackups, "backup.compress", false, "GZIP backup files.")
 	flag.Parse()
 
 	// These are OpenBSD specific protections used to prevent unnecessary file access.
@@ -460,9 +465,12 @@ func main() {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			if r.Method == "PUT" && numBackups > 0 {
-				backupDir := path.Join(davDir, user, "backups")
-				if err := createBackup(fullPath, filepath.Clean(path.Join(backupDir, r.URL.Path))); err != nil {
+			if r.Method == "PUT" && createBackups {
+				bDir := backupsDir
+				if bDir == "" {
+					bDir = path.Join(davDir, user, "backups")
+				}
+				if err := createBackup(fullPath, filepath.Clean(path.Join(bDir, r.URL.Path))); err != nil {
 					log.Println(err)
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
