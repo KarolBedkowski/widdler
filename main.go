@@ -111,7 +111,7 @@ func init() {
 	flag.StringVar(&tlsCert, "tlscert", "", "TLS certificate.")
 	flag.StringVar(&tlsKey, "tlskey", "", "TLS key.")
 	flag.StringVar(&passPath, "htpass", fmt.Sprintf("%s/.htpasswd", dir), "Path to .htpasswd file..")
-	flag.StringVar(&auth, "auth", "basic", "Enable HTTP Basic Authentication.")
+	flag.StringVar(&auth, "auth", "none", "Enable HTTP Basic Authentication (basic, none, header).")
 	flag.BoolVar(&genHtpass, "gen", false, "Generate a .htpasswd file or add a new entry to an existing file.")
 	flag.BoolVar(&version, "v", false, "Show version and exit.")
 
