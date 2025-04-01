@@ -133,6 +133,11 @@ func init() {
 	if err != nil {
 		log.Fatalln(err)
 	}
+
+	davDir, err = filepath.Abs(davDir)
+	if err != nil {
+		log.Fatalln(err)
+	}
 }
 
 func authenticate(user string, pass string) bool {
@@ -434,7 +439,7 @@ func main() {
 
 		defer handler.mu.Unlock()
 
-		userPath := filepath.Clean(path.Join(davDir, user))
+		userPath := path.Join(davDir, user)
 		fullPath := path.Join(davDir, user, r.URL.Path)
 		fullPath = filepath.Clean(fullPath)
 		if !strings.HasPrefix(fullPath, userPath) {
