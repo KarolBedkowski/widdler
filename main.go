@@ -116,7 +116,7 @@ func init() {
 	flag.BoolVar(&version, "v", false, "Show version and exit.")
 
 	flag.BoolVar(&createBackups, "backups", false, "Create backup written files.")
-	flag.StringVar(&backupsDir, "backups.dir", "", "Directory for backups. Default `<wikis>/<user>/backups")
+	flag.StringVar(&backupsDir, "backups.dir", "backups", "Directory for backups in user directory.")
 	flag.IntVar(&numBackups, "backups.files", 10, "Maximum number of backup each file.")
 	flag.IntVar(&minBackupAge, "backup.age", 60, "Minimal time between backups (in seconds)")
 	flag.BoolVar(&compressBackups, "backup.compress", false, "GZIP backup files.")
@@ -466,10 +466,7 @@ func main() {
 				return
 			}
 			if r.Method == "PUT" && createBackups {
-				bDir := backupsDir
-				if bDir == "" {
-					bDir = path.Join(davDir, user, "backups")
-				}
+				bDir := path.Join(davDir, user, backupsDir)
 				if err := createBackup(fullPath, filepath.Clean(path.Join(bDir, r.URL.Path))); err != nil {
 					log.Println(err)
 					http.Error(w, err.Error(), http.StatusInternalServerError)
