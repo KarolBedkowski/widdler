@@ -138,6 +138,14 @@ func init() {
 	if err != nil {
 		log.Fatalln(err)
 	}
+
+	log.Printf("Wikis directory: %s\n", davDir)
+	log.Printf("Auth: %s\n", auth)
+	if createBackups {
+		log.Printf("Backups enabled; dir: '%s'; max files: %d, min age: %ds, compress: %v\n", backupsDir, numBackups, minBackupAge, compressBackups)
+	} else {
+		log.Println("Backups disabled")
+	}
 }
 
 func authenticate(user string, pass string) bool {
@@ -232,7 +240,7 @@ func createBackup(path, backupPath string) error {
 		}
 	}
 
-	log.Printf("backup %s -> %s\n", path, backupPath)
+	log.Printf("backup %s -> %s\n", path, dstFilename)
 
 	source, err := os.Open(path)
 	if err != nil {
@@ -446,6 +454,7 @@ func main() {
 			http.Error(w, "Bad request", http.StatusBadRequest)
 			return
 		}
+		log.Printf("Resolved file: %s", fullPath)
 
 		_, dErr := os.Stat(userPath)
 		if os.IsNotExist(dErr) {
