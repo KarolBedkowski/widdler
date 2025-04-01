@@ -90,11 +90,11 @@ var (
 	version    bool
 	build      string
 
-	createBackups   bool
-	backupsDir      string
-	numBackups      int
-	minBackupAge    int
-	compressBackups bool
+	backupsEnabled bool
+	backupDir      string
+	backupFiles    int
+	backupMinAge   int
+	backupCompress bool
 )
 
 var pledges = "stdio wpath rpath cpath tty inet dns unveil"
@@ -115,11 +115,11 @@ func init() {
 	flag.BoolVar(&genHtpass, "gen", false, "Generate a .htpasswd file or add a new entry to an existing file.")
 	flag.BoolVar(&version, "v", false, "Show version and exit.")
 
-	flag.BoolVar(&createBackups, "backups", false, "Create backup written files.")
-	flag.StringVar(&backupsDir, "backups.dir", "backups", "Directory for backups in user directory.")
-	flag.IntVar(&numBackups, "backups.files", 10, "Maximum number of backup each file.")
-	flag.IntVar(&minBackupAge, "backup.age", 60, "Minimal time between backups (in seconds)")
-	flag.BoolVar(&compressBackups, "backup.compress", false, "GZIP backup files.")
+	flag.BoolVar(&backupsEnabled, "backup", false, "Create backup written files.")
+	flag.StringVar(&backupDir, "backup.dir", "backups", "Directory for backups in user directory.")
+	flag.IntVar(&backupFiles, "backup.files", 10, "Maximum number of backup each file.")
+	flag.IntVar(&backupMinAge, "backup.age", 60, "Minimal time between backups (in seconds)")
+	flag.BoolVar(&backupCompress, "backup.compress", false, "GZIP backup files.")
 	flag.Parse()
 
 	// These are OpenBSD specific protections used to prevent unnecessary file access.
@@ -141,8 +141,8 @@ func init() {
 
 	log.Printf("Wikis directory: %s\n", davDir)
 	log.Printf("Auth: %s\n", auth)
-	if createBackups {
-		log.Printf("Backups enabled; dir: '%s'; max files: %d, min age: %ds, compress: %v\n", backupsDir, numBackups, minBackupAge, compressBackups)
+	if backupsEnabled {
+		log.Printf("Backups enabled; dir: '%s'; max files: %d, min age: %ds, compress: %v\n", backupDir, backupFiles, backupMinAge, backupCompress)
 	} else {
 		log.Println("Backups disabled")
 	}
@@ -188,18 +188,18 @@ func createEmpty(path string) error {
 }
 
 func deleteOldBackups(fileBase string) {
-	files, err := filepath.Glob(fileBase + "-*")
+	files, err := filepath.Glob(fileBase + "-*_*.html*")
 	if err != nil {
 		fmt.Printf("delete old backups error: %v\n", err)
 		return
 	}
 
-	if len(files) <= numBackups {
+	if len(files) <= backupFiles {
 		return
 	}
 	sort.Strings(files)
 
-	toDel := files[:len(files)-numBackups]
+	toDel := files[:len(files)-backupFiles]
 	for _, fname := range toDel {
 		fmt.Printf("delete old backup: %s\n", fname)
 		os.Remove(fname)
@@ -215,9 +215,9 @@ func createBackup(path, backupPath string) error {
 
 	now := time.Now()
 
-	if minBackupAge > 0 {
+	if backupMinAge > 0 {
 		if oldBackupTs, ok := backupsAge[path]; ok {
-			if now.Sub(oldBackupTs) < time.Duration(minBackupAge)*time.Second {
+			if now.Sub(oldBackupTs) < time.Duration(backupMinAge)*time.Second {
 				return nil
 			}
 		}
@@ -229,7 +229,7 @@ func createBackup(path, backupPath string) error {
 	base := backupPath[0 : len(backupPath)-len(ext)]
 	dstFilename := base + "-" + now.Format("20060102_150405") + ext
 
-	if compressBackups {
+	if backupCompress {
 		dstFilename += ".gz"
 	}
 
@@ -256,7 +256,7 @@ func createBackup(path, backupPath string) error {
 	}
 	defer destination.Close()
 
-	if compressBackups {
+	if backupCompress {
 		destination, err = gzip.NewWriterLevel(destination, gzip.BestCompression)
 		if err != nil {
 			return fmt.Errorf("create gzip writer error: %w", err)
@@ -479,8 +479,8 @@ func main() {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			if r.Method == "PUT" && createBackups {
-				bDir := path.Join(davDir, user, backupsDir)
+			if r.Method == "PUT" && backupsEnabled {
+				bDir := path.Join(davDir, user, backupDir)
 				if err := createBackup(fullPath, filepath.Clean(path.Join(bDir, r.URL.Path))); err != nil {
 					log.Println(err)
 					http.Error(w, err.Error(), http.StatusInternalServerError)
