@@ -219,7 +219,7 @@ func createBackup(path, backupPath string) error {
 
 	ext := filepath.Ext(backupPath)
 	base := backupPath[0 : len(backupPath)-len(ext)]
-	dstFilename := base + "-" + now.Format("2006010_2150405") + ext
+	dstFilename := base + "-" + now.Format("20060102_150405") + ext
 
 	if compressBackups {
 		dstFilename += ".gz"
