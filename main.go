@@ -296,7 +296,7 @@ func addHandler(u, uPath string) {
 		dav: &webdav.Handler{
 			LockSystem: webdav.NewMemLS(),
 			FileSystem: webdav.Dir(uPath),
-			Logger: func(r *http.Request, err error) {
+			Logger: func(_ *http.Request, err error) {
 				// log.Print(r)
 				if err != nil {
 					log.Print(err)
@@ -333,7 +333,7 @@ func main() {
 			log.Fatalln(err)
 		}
 
-		if _, err := f.WriteString(fmt.Sprintf("%s:%s\n", user, hash)); err != nil {
+		if _, err := fmt.Fprintf(f, "%s:%s\n", user, hash); err != nil {
 			log.Fatalln(err)
 		}
 
@@ -411,7 +411,7 @@ func main() {
 
 		if auth == "basic" {
 			user, pass, ok = r.BasicAuth()
-			if !(ok && authenticate(user, pass)) {
+			if !ok || !authenticate(user, pass) {
 				w.Header().Set("WWW-Authenticate", `Basic realm="widdler"`)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
@@ -427,7 +427,7 @@ func main() {
 				}
 			}
 
-			if !(ok && authenticate(user, pass)) {
+			if !ok || !authenticate(user, pass) {
 				w.Header().Set("WWW-Authenticate", `Basic realm="widdler"`)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
@@ -546,10 +546,10 @@ func main() {
 
 		log.Printf("Listening for HTTPS on 'https://%s'", listen)
 		log.Fatalln(s.ServeTLS(lis, tlsCert, tlsKey))
-	} else {
-		fullListen = fmt.Sprintf("http://%s", listen)
-
-		log.Printf("Listening for HTTP on 'http://%s'", listen)
-		log.Fatalln(s.Serve(lis))
 	}
+
+	fullListen = fmt.Sprintf("http://%s", listen)
+
+	log.Printf("Listening for HTTP on 'http://%s'", listen)
+	log.Fatalln(s.Serve(lis))
 }
