@@ -258,6 +258,8 @@ func createBackup(path, backupPath string) error {
 
 	if backupCompress {
 		destination, err = gzip.NewWriterLevel(destination, gzip.BestCompression)
+		defer destination.Close()
+
 		if err != nil {
 			return fmt.Errorf("create gzip writer error: %w", err)
 		}
