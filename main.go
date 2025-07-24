@@ -90,11 +90,12 @@ var (
 	version    bool
 	build      string
 
-	backupsEnabled bool
-	backupDir      string
-	backupFiles    int
-	backupMinAge   int
-	backupCompress bool
+	backupsEnabled        bool
+	backupDir             string
+	backupCompress        bool
+	backupOnWrite         int
+	backupOnWriteInterval int
+	backupDaily           int
 )
 
 var pledges = "stdio wpath rpath cpath tty inet dns unveil"
@@ -115,11 +116,11 @@ func init() {
 	flag.BoolVar(&genHtpass, "gen", false, "Generate a .htpasswd file or add a new entry to an existing file.")
 	flag.BoolVar(&version, "v", false, "Show version and exit.")
 
-	flag.BoolVar(&backupsEnabled, "backup", false, "Create backup written files.")
 	flag.StringVar(&backupDir, "backup.dir", "backups", "Directory for backups in user directory.")
-	flag.IntVar(&backupFiles, "backup.files", 10, "Maximum number of backup each file.")
-	flag.IntVar(&backupMinAge, "backup.age", 60, "Minimal time between backups (in seconds)")
 	flag.BoolVar(&backupCompress, "backup.compress", false, "GZIP backup files.")
+	flag.IntVar(&backupOnWrite, "backup.on_write", 0, "If > 0 create backup written files up to given files.")
+	flag.IntVar(&backupOnWriteInterval, "backup.on_write_age", 60, "Minimal time between backups (in seconds)")
+	flag.IntVar(&backupDaily, "backup.daily", 0, "If >0 create daily backup for written files and keep up to given files.")
 	flag.Parse()
 
 	// These are OpenBSD specific protections used to prevent unnecessary file access.
@@ -141,11 +142,17 @@ func init() {
 
 	log.Printf("Wikis directory: %s\n", davDir)
 	log.Printf("Auth: %s\n", auth)
-	if backupsEnabled {
-		log.Printf("Backups enabled; dir: '%s'; max files: %d, min age: %ds, compress: %v\n", backupDir, backupFiles, backupMinAge, backupCompress)
+	if backupOnWrite > 0 {
+		log.Printf("Backups on write enabled; dir: '%s'; max files: %d, min age: %ds, compress: %v\n", backupDir, backupOnWrite, backupOnWriteInterval, backupCompress)
 	} else {
 		log.Println("Backups disabled")
 	}
+
+	if backupDaily > 0 {
+		log.Printf("Daily Backups enabled; dir: '%s'; max files: %d, compress: %v\n", backupDir, backupDaily, backupCompress)
+	}
+
+	backupsEnabled = backupOnWrite > 0 || backupDaily > 0
 }
 
 func authenticate(user string, pass string) bool {
@@ -187,26 +194,42 @@ func createEmpty(path string) error {
 	return nil
 }
 
-func deleteOldBackups(fileBase string) {
-	files, err := filepath.Glob(fileBase + "-*_*.html*")
+func deleteOldBackups(prefix string, reMask *regexp.Regexp, maxFiles int) error {
+	allFiles, err := filepath.Glob(prefix + "-*.htm*")
 	if err != nil {
 		fmt.Printf("delete old backups error: %v\n", err)
-		return
+		return nil
 	}
 
-	if len(files) <= backupFiles {
-		return
+	files := make([]string, 0, len(allFiles))
+	for _, f := range allFiles {
+		if reMask.Match([]byte(f)) {
+			files = append(files, f)
+		}
 	}
+
+	if len(files) <= maxFiles {
+		return nil
+	}
+
 	sort.Strings(files)
 
-	toDel := files[:len(files)-backupFiles]
+	toDel := files[:len(files)-maxFiles]
 	for _, fname := range toDel {
 		fmt.Printf("delete old backup: %s\n", fname)
-		os.Remove(fname)
+		if err := os.Remove(fname); err != nil {
+			return fmt.Errorf("remove %s error: %w", fname, err)
+		}
 	}
+
+	return nil
 }
 
-var backupsAge = make(map[string]time.Time)
+var (
+	backupsAge         = make(map[string]time.Time)
+	maskDailyBackups   = regexp.MustCompile(`-[0-9]{8}.html?(\.gz)?$`)
+	maskOnWriteBackups = regexp.MustCompile(`-[0-9]{8}_[0-9]{6}.html?(\.gz)?$`)
+)
 
 func createBackup(path, backupPath string) error {
 	if _, err := os.Stat(path); err != nil {
@@ -214,21 +237,62 @@ func createBackup(path, backupPath string) error {
 	}
 
 	now := time.Now()
+	ext := filepath.Ext(backupPath)
+	base := backupPath[0 : len(backupPath)-len(ext)]
 
-	if backupMinAge > 0 {
-		if oldBackupTs, ok := backupsAge[path]; ok {
-			if now.Sub(oldBackupTs) < time.Duration(backupMinAge)*time.Second {
-				return nil
+	if backupOnWrite > 0 {
+		create := true
+
+		if backupOnWriteInterval > 0 {
+			if oldBackupTs, ok := backupsAge[path]; ok {
+				if now.Sub(oldBackupTs) < time.Duration(backupOnWriteInterval)*time.Second {
+					create = false
+				}
 			}
 		}
 
-		backupsAge[path] = now
+		if create {
+			backupsAge[path] = now
+
+			// create backup on save
+			dstFilename := base + "-" + now.Format("20060102_150405") + ext
+			if err := createFileBackup(path, dstFilename); err != nil {
+				return err
+			}
+
+			if err := deleteOldBackups(base, maskOnWriteBackups, backupOnWrite); err != nil {
+				return err
+			}
+		}
 	}
 
-	ext := filepath.Ext(backupPath)
-	base := backupPath[0 : len(backupPath)-len(ext)]
-	dstFilename := base + "-" + now.Format("20060102_150405") + ext
+	if backupDaily > 0 {
+		// create daily backup
+		dstFilename := base + "-" + now.Format("20060102") + ext
+		if _, err := os.Stat(dstFilename); err == nil {
+			// already exists; skip
+			return nil
+		}
 
+		if err := createFileBackup(path, dstFilename); err != nil {
+			return err
+		}
+
+		if err := deleteOldBackups(base, maskDailyBackups, backupDaily); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func closeFile(obj io.Closer, msg string, v ...any) {
+	if err := obj.Close(); err != nil {
+		log.Printf(msg, append(v, err))
+	}
+}
+
+func createFileBackup(path, dstFilename string) error {
 	if backupCompress {
 		dstFilename += ".gz"
 	}
@@ -246,7 +310,7 @@ func createBackup(path, backupPath string) error {
 	if err != nil {
 		return fmt.Errorf("open %s for backup error: %w", path, err)
 	}
-	defer source.Close()
+	defer closeFile(source, "close %s error: %s", path)
 
 	var destination io.WriteCloser
 
@@ -254,11 +318,11 @@ func createBackup(path, backupPath string) error {
 	if err != nil {
 		return fmt.Errorf("create backup file %s error: %w", dstFilename, err)
 	}
-	defer destination.Close()
+	defer closeFile(destination, "close %s error: %s", dstFilename)
 
 	if backupCompress {
 		destination, err = gzip.NewWriterLevel(destination, gzip.BestCompression)
-		defer destination.Close()
+		defer closeFile(destination, "close gzip error: %s")
 
 		if err != nil {
 			return fmt.Errorf("create gzip writer error: %w", err)
@@ -267,8 +331,6 @@ func createBackup(path, backupPath string) error {
 	if _, err = io.Copy(destination, source); err != nil {
 		return fmt.Errorf("create backup file error: %w", err)
 	}
-
-	deleteOldBackups(base)
 
 	return nil
 }
