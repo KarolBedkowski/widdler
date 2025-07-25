@@ -256,12 +256,12 @@ func createBackup(path, backupPath string) error {
 
 			// create backup on save
 			dstFilename := base + "-" + now.Format("20060102_150405") + ext
-			if err := createFileBackup(path, dstFilename); err != nil {
+			if created, err := createFileBackup(path, dstFilename); err != nil {
 				return err
-			}
-
-			if err := deleteOldBackups(base, maskOnWriteBackups, backupOnWrite); err != nil {
-				return err
+			} else if created {
+				if err := deleteOldBackups(base, maskOnWriteBackups, backupOnWrite); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -269,17 +269,12 @@ func createBackup(path, backupPath string) error {
 	if backupDaily > 0 {
 		// create daily backup
 		dstFilename := base + "-" + now.Format("20060102") + ext
-		if _, err := os.Stat(dstFilename); err == nil {
-			// already exists; skip
-			return nil
-		}
-
-		if err := createFileBackup(path, dstFilename); err != nil {
+		if created, err := createFileBackup(path, dstFilename); err != nil {
 			return err
-		}
-
-		if err := deleteOldBackups(base, maskDailyBackups, backupDaily); err != nil {
-			return err
+		} else if created {
+			if err := deleteOldBackups(base, maskDailyBackups, backupDaily); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -292,15 +287,20 @@ func closeFile(obj io.Closer, msg string, v ...any) {
 	}
 }
 
-func createFileBackup(path, dstFilename string) error {
+func createFileBackup(path, dstFilename string) (bool, error) {
 	if backupCompress {
 		dstFilename += ".gz"
+	}
+
+	if _, err := os.Stat(dstFilename); err == nil {
+		// already exists; skip
+		return false, nil
 	}
 
 	backupDir, _ := filepath.Split(dstFilename)
 	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(backupDir, 0o700); err != nil {
-			return fmt.Errorf("create backup dir %s error: %w", backupDir, err)
+			return false, fmt.Errorf("create backup dir %s error: %w", backupDir, err)
 		}
 	}
 
@@ -308,7 +308,7 @@ func createFileBackup(path, dstFilename string) error {
 
 	source, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("open %s for backup error: %w", path, err)
+		return false, fmt.Errorf("open %s for backup error: %w", path, err)
 	}
 	defer closeFile(source, "close %s error: %s", path)
 
@@ -316,7 +316,7 @@ func createFileBackup(path, dstFilename string) error {
 
 	destination, err = os.Create(dstFilename)
 	if err != nil {
-		return fmt.Errorf("create backup file %s error: %w", dstFilename, err)
+		return false, fmt.Errorf("create backup file %s error: %w", dstFilename, err)
 	}
 	defer closeFile(destination, "close %s error: %s", dstFilename)
 
@@ -325,14 +325,14 @@ func createFileBackup(path, dstFilename string) error {
 		defer closeFile(destination, "close gzip error: %s")
 
 		if err != nil {
-			return fmt.Errorf("create gzip writer error: %w", err)
+			return false, fmt.Errorf("create gzip writer error: %w", err)
 		}
 	}
 	if _, err = io.Copy(destination, source); err != nil {
-		return fmt.Errorf("create backup file error: %w", err)
+		return false, fmt.Errorf("create backup file error: %w", err)
 	}
 
-	return nil
+	return true, nil
 }
 
 func prompt(prompt string, secure bool) (string, error) {
