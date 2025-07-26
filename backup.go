@@ -16,42 +16,43 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"time"
 )
 
-var (
-	maskDailyBackups   = regexp.MustCompile(`-[0-9]{8}.html?(\.gz)?$`)
-	maskOnWriteBackups = regexp.MustCompile(`-[0-9]{8}_[0-9]{6}.html?(\.gz)?$`)
-)
+const cleanTaskInterval = 300 // sec
 
 type Backuper struct {
-	backupDir             string
-	compress              bool
-	backupOnWrite         int
-	backupOnWriteInterval int
-	backupDaily           int
+	enabled   bool
+	compress  bool
+	interval  int
+	backupDir string
+
+	keepOnWrite int
+	keepDaily   int
 
 	backupsAge map[string]time.Time
 }
 
-func (b *Backuper) init() {
-	if b.backupOnWrite > 0 {
-		log.Printf("Backups on write enabled; dir: '%s'; max files: %d, min age: %ds, compress: %v\n",
-			b.backupDir, b.backupOnWrite, b.backupOnWriteInterval, b.compress)
-		b.backupsAge = make(map[string]time.Time)
-	} else {
+func (b *Backuper) start() {
+	b.enabled = b.keepDaily > 0 || b.keepOnWrite > 0
+
+	if !b.enabled {
 		log.Println("Backups disabled")
+		return
 	}
 
-	if b.backupDaily > 0 {
-		log.Printf("Daily Backups enabled; dir: '%s'; max files: %d, compress: %v\n",
-			b.backupDir, b.backupDaily, b.compress)
-	}
+	log.Printf("Backups enabled; dir: %q; max files: %d on write, %d daily, min age: %ds, compress: %v\n",
+		b.backupDir, b.keepOnWrite, b.keepDaily, b.interval, b.compress)
+
+	b.backupsAge = make(map[string]time.Time)
+
+	go b.cleanWorker()
 }
 
 func (b *Backuper) create(user, reqPath string) error {
-	if b.backupOnWrite < 1 && b.backupDaily < 1 {
+	if !b.enabled {
 		return nil
 	}
 
@@ -82,28 +83,12 @@ func (b *Backuper) createBackup(srcFilePath, dstFilePath string) error {
 		}
 	}
 
-	if b.backupOnWrite > 0 {
-		if err := b.createBackupOnWrite(srcFilePath, dstFilePath); err != nil {
-			return err
-		}
-	}
-
-	if b.backupDaily > 0 {
-		if err := b.createBackupDaily(srcFilePath, dstFilePath); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (b *Backuper) createBackupOnWrite(srcFilePath, dstFilePath string) error {
 	now := time.Now()
 
-	if b.backupOnWriteInterval > 0 {
+	if b.interval > 0 {
 		// check is need to create next backup
 		if oldBackupTs, ok := b.backupsAge[srcFilePath]; ok {
-			if now.Sub(oldBackupTs) < time.Duration(b.backupOnWriteInterval)*time.Second {
+			if now.Sub(oldBackupTs) < time.Duration(b.interval)*time.Second {
 				return nil
 			}
 		}
@@ -112,34 +97,11 @@ func (b *Backuper) createBackupOnWrite(srcFilePath, dstFilePath string) error {
 	}
 
 	base, ext := splitNameExt(dstFilePath)
-	dstFilename := base + "-" + now.Format("20060102_150405") + ext
+	dstFilename := base + "--" + now.Format("20060102_150405") + ext
 
-	created, err := b.backupFile(srcFilePath, dstFilename)
-	if err != nil || !created {
-		return err
-	}
+	_, err := b.backupFile(srcFilePath, dstFilename)
 
-	if err := b.deleteOldBackups(base, maskOnWriteBackups, b.backupOnWrite); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (b *Backuper) createBackupDaily(srcFilePath, dstFilePath string) error {
-	base, ext := splitNameExt(dstFilePath)
-	dstFilename := base + "-" + time.Now().Format("20060102") + ext
-
-	created, err := b.backupFile(srcFilePath, dstFilename)
-	if err != nil || !created {
-		return err
-	}
-
-	if err := b.deleteOldBackups(base, maskDailyBackups, b.backupDaily); err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 // closeFile close obj and log error.
@@ -191,8 +153,32 @@ func (b *Backuper) backupFile(path, dstFilename string) (bool, error) {
 	return true, nil
 }
 
-func (b *Backuper) deleteOldBackups(prefix string, reMask *regexp.Regexp, maxFiles int) error {
-	prefix += "-*.htm*"
+func (b *Backuper) cleanWorker() {
+	usersDirs := make([]string, 0, len(users))
+	if len(users) == 0 {
+		usersDirs = append(usersDirs, path.Join(davDir, b.backupDir))
+	} else {
+		for _, u := range users {
+			usersDirs = append(usersDirs, path.Join(davDir, u, b.backupDir))
+		}
+	}
+
+	log.Printf("clean old backups worker started; dirs %v", usersDirs)
+
+	c := time.Tick(cleanTaskInterval * time.Second)
+	for {
+		for _, ud := range usersDirs {
+			if err := b.deleteOldBackups(ud); err != nil {
+				log.Printf("delete old backups in %q error: %s\n", ud, err)
+			}
+		}
+
+		<-c
+	}
+}
+
+func (b *Backuper) deleteOldBackups(directory string) error {
+	prefix := path.Join(directory, "*--*.htm*")
 
 	// find all files with prefix
 	allFiles, err := filepath.Glob(prefix)
@@ -200,23 +186,7 @@ func (b *Backuper) deleteOldBackups(prefix string, reMask *regexp.Regexp, maxFil
 		return fmt.Errorf("find old backups (%q) for delete error: %w", prefix, err)
 	}
 
-	// filter files by mask (separate daily/onWrite files)
-	files := make([]string, 0, len(allFiles))
-	for _, f := range allFiles {
-		if reMask.Match([]byte(f)) {
-			files = append(files, f)
-		}
-	}
-
-	if len(files) <= maxFiles {
-		return nil
-	}
-
-	// sort by name = by time
-	sort.Strings(files)
-
-	// keep only `maxFiles` newest files
-	toDel := files[:len(files)-maxFiles]
+	toDel := selectFilesToDel(allFiles, time.Now(), b.keepOnWrite, b.keepDaily)
 
 	// delete
 	for _, fname := range toDel {
@@ -227,4 +197,61 @@ func (b *Backuper) deleteOldBackups(prefix string, reMask *regexp.Regexp, maxFil
 	}
 
 	return nil
+}
+
+var backupNameRe = regexp.MustCompile(`--([0-9]{8})(_([0-9]{6}))?.html?(\.gz)?$`)
+
+func selectFilesToDel(files []string, now time.Time, keepOnWrite, keepDaily int) []string {
+	// sort files from newer to oldest
+	sort.Strings(files)
+	slices.Reverse(files)
+
+	today := now.Format("20060102")
+	todayFiles := 0
+	dailyFiles := 0
+	prevDate := ""
+
+	var toDel []string
+
+	for _, f := range files {
+		sp := backupNameRe.FindStringSubmatch(f)
+		if len(sp) < 4 {
+			continue
+		}
+
+		date := sp[1]
+
+		if date == today {
+			// found today created file; count it and delete if number > keepOnWrite
+			todayFiles += 1
+			if todayFiles > keepOnWrite {
+				toDel = append(toDel, f)
+			}
+
+			continue
+		}
+
+		// found files older than today
+
+		// more than required files found; delete it
+		if dailyFiles >= keepDaily {
+			toDel = append(toDel, f)
+			continue
+		}
+
+		if date == prevDate {
+			// found another file in the same date as previous, delete
+			toDel = append(toDel, f)
+			continue
+		}
+
+		prevDate = date
+		dailyFiles += 1
+
+		if dailyFiles >= keepDaily {
+			toDel = append(toDel, f)
+		}
+	}
+
+	return toDel
 }

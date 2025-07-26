@@ -92,7 +92,7 @@ var pledges = "stdio wpath rpath cpath tty inet dns unveil"
 
 var backuper = Backuper{}
 
-func init() {
+func initApp() {
 	users = make(map[string]string)
 	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
 	if err != nil {
@@ -110,9 +110,9 @@ func init() {
 
 	flag.StringVar(&backuper.backupDir, "backup.dir", "backups", "Directory for backups in user directory.")
 	flag.BoolVar(&backuper.compress, "backup.compress", false, "GZIP backup files.")
-	flag.IntVar(&backuper.backupOnWrite, "backup.on_write", 0, "If > 0 create backup written files up to given files.")
-	flag.IntVar(&backuper.backupOnWriteInterval, "backup.on_write_age", 60, "Minimal time between backups (in seconds)")
-	flag.IntVar(&backuper.backupDaily, "backup.daily", 0, "If >0 create daily backup for written files and keep up to given files.")
+	flag.IntVar(&backuper.keepDaily, "backup.keep_daily", 0, "If > 0 keep given number of daily backups.")
+	flag.IntVar(&backuper.keepOnWrite, "backup.keep_on_write", 0, "If > 0 keep given number of backup created on write.)")
+	flag.IntVar(&backuper.interval, "backup.interval", 60, "Minimal time between backups (in seconds)")
 	flag.Parse()
 
 	// These are OpenBSD specific protections used to prevent unnecessary file access.
@@ -134,8 +134,6 @@ func init() {
 
 	log.Printf("Wikis directory: %s\n", davDir)
 	log.Printf("Auth: %s\n", auth)
-
-	backuper.init()
 }
 
 func authenticate(user string, pass string) bool {
@@ -214,6 +212,8 @@ func addHandler(u, uPath string) {
 }
 
 func main() {
+	initApp()
+
 	if version {
 		fmt.Println(build)
 		os.Exit(0)
@@ -452,6 +452,8 @@ func main() {
 		log.Printf("Listening for HTTPS on 'https://%s'", listen)
 		log.Fatalln(s.ServeTLS(lis, tlsCert, tlsKey))
 	}
+
+	backuper.start()
 
 	fullListen = fmt.Sprintf("http://%s", listen)
 
