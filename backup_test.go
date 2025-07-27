@@ -38,7 +38,6 @@ func TestSelectToDel1(t *testing.T) {
 		"b--20250720_112010.html.gz",
 		"b--20250720_112030.htm.gz",
 		"b--20250719_093000.html",
-		"b--20250716_063456.htm",
 		"b--20250715_053000.html",
 	}
 
@@ -136,6 +135,37 @@ func TestSelectToDel3(t *testing.T) {
 	for _, exp := range expToDel {
 		if !slices.Contains(toDel, exp) {
 			t.Fatalf("missing %q in toDel %v", exp, toDel)
+		}
+	}
+}
+
+func TestGroupFiles1(t *testing.T) {
+	files := []string{
+		"b--20250720_123456.htm",
+		"ba--20250720_123000.html",
+		"bb--20250720_122030.htm.gz",
+		"bc--20250720_122010.html.gz",
+		"b-20250720_113456.htm", // ignored
+		"ba--20250720_113000.html",
+		"bb--20250720_112010.html.gz",
+	}
+
+	expected := map[string][]string{
+		"b":  {"b--20250720_123456.htm"},
+		"ba": {"ba--20250720_123000.html", "ba--20250720_113000.html"},
+		"bb": {"bb--20250720_122030.htm.gz", "bb--20250720_112010.html.gz"},
+		"bc": {"bc--20250720_122010.html.gz"},
+	}
+
+	groups := groupFilesByPrefix(files)
+
+	if len(expected) != len(groups) {
+		t.Fatalf("invalid result: %v", groups)
+	}
+
+	for g, exp := range expected {
+		if slices.Compare(exp, groups[g]) != 0 {
+			t.Fatalf("for %q expected %#v got %#v", g, exp, groups[g])
 		}
 	}
 }

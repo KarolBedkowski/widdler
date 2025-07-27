@@ -6,6 +6,9 @@ package main
 //
 // Distributed under terms of the GPLv3 license.
 //
+// Backups are:
+// - up to `keepOnWrite` backups created today for each file.
+// - up to `keepDaily` last backups created in previous days.
 
 import (
 	"compress/gzip"
@@ -18,6 +21,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -62,25 +66,11 @@ func (b *Backuper) create(user, reqPath string) error {
 		return nil
 	}
 
-	dstFilePath := path.Join(davDir, user, b.backupDir, reqPath)
-	return b.createBackup(srcFilePath, filepath.Clean(dstFilePath))
-}
+	dstFilePath := filepath.Clean(path.Join(davDir, user, b.backupDir, reqPath))
 
-func splitNameExt(path string) (string, string) {
-	ext := filepath.Ext(path)
-	// path to dst file without extension
-	base := path[0 : len(path)-len(ext)]
-
-	return base, ext
-}
-
-func (b *Backuper) createBackup(srcFilePath, dstFilePath string) error {
 	// create backup dir if not exists
-	backupDir, _ := filepath.Split(dstFilePath)
-	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(backupDir, 0o700); err != nil {
-			return fmt.Errorf("create backup dir %s error: %w", backupDir, err)
-		}
+	if err := ensureBackupDirExists(dstFilePath); err != nil {
+		return err
 	}
 
 	now := time.Now()
@@ -96,36 +86,28 @@ func (b *Backuper) createBackup(srcFilePath, dstFilePath string) error {
 		b.backupsAge[srcFilePath] = now
 	}
 
+	// build backup file name - add postfix before extention
 	base, ext := splitNameExt(dstFilePath)
 	dstFilename := base + "--" + now.Format("20060102_150405") + ext
 
-	_, err := b.backupFile(srcFilePath, dstFilename)
-
-	return err
+	return b.backupFile(srcFilePath, dstFilename)
 }
 
-// closeFile close obj and log error.
-func closeFile(obj io.Closer, msg string, v ...any) {
-	if err := obj.Close(); err != nil {
-		log.Printf(msg, append(v, err))
-	}
-}
-
-func (b *Backuper) backupFile(path, dstFilename string) (bool, error) {
+func (b *Backuper) backupFile(path, dstFilename string) error {
 	if b.compress {
 		dstFilename += ".gz"
 	}
 
 	if _, err := os.Stat(dstFilename); err == nil {
 		// already exists; skip
-		return false, nil
+		return nil
 	}
 
 	log.Printf("backup %s -> %s\n", path, dstFilename)
 
 	source, err := os.Open(path)
 	if err != nil {
-		return false, fmt.Errorf("open %s for backup error: %w", path, err)
+		return fmt.Errorf("open %s for backup error: %w", path, err)
 	}
 	defer closeFile(source, "close %s error: %s", path)
 
@@ -133,7 +115,7 @@ func (b *Backuper) backupFile(path, dstFilename string) (bool, error) {
 
 	destination, err = os.Create(dstFilename)
 	if err != nil {
-		return false, fmt.Errorf("create backup file %s error: %w", dstFilename, err)
+		return fmt.Errorf("create backup file %s error: %w", dstFilename, err)
 	}
 	defer closeFile(destination, "close %s error: %s", dstFilename)
 
@@ -142,15 +124,15 @@ func (b *Backuper) backupFile(path, dstFilename string) (bool, error) {
 		defer closeFile(destination, "close gzip error: %s")
 
 		if err != nil {
-			return false, fmt.Errorf("create gzip writer error: %w", err)
+			return fmt.Errorf("create gzip writer error: %w", err)
 		}
 	}
 
 	if _, err = io.Copy(destination, source); err != nil {
-		return false, fmt.Errorf("create backup file error: %w", err)
+		return fmt.Errorf("create backup file error: %w", err)
 	}
 
-	return true, nil
+	return nil
 }
 
 func (b *Backuper) cleanWorker() {
@@ -186,13 +168,17 @@ func (b *Backuper) deleteOldBackups(directory string) error {
 		return fmt.Errorf("find old backups (%q) for delete error: %w", prefix, err)
 	}
 
-	toDel := selectFilesToDel(allFiles, time.Now(), b.keepOnWrite, b.keepDaily)
+	groups := groupFilesByPrefix(allFiles)
 
-	// delete
-	for _, fname := range toDel {
-		fmt.Printf("delete old backup: %s\n", fname)
-		if err := os.Remove(fname); err != nil {
-			return fmt.Errorf("remove %q error: %w", fname, err)
+	for _, files := range groups {
+
+		toDel := selectFilesToDel(files, time.Now(), b.keepOnWrite, b.keepDaily)
+		// delete
+		for _, fname := range toDel {
+			fmt.Printf("delete old backup: %s\n", fname)
+			if err := os.Remove(fname); err != nil {
+				return fmt.Errorf("remove %q error: %w", fname, err)
+			}
 		}
 	}
 
@@ -219,9 +205,9 @@ func selectFilesToDel(files []string, now time.Time, keepOnWrite, keepDaily int)
 			continue
 		}
 
-		date := sp[1]
+		dateFromFile := sp[1]
 
-		if date == today {
+		if dateFromFile == today {
 			// found today created file; count it and delete if number > keepOnWrite
 			todayFiles += 1
 			if todayFiles > keepOnWrite {
@@ -239,13 +225,13 @@ func selectFilesToDel(files []string, now time.Time, keepOnWrite, keepDaily int)
 			continue
 		}
 
-		if date == prevDate {
-			// found another file in the same date as previous, delete
+		if dateFromFile == prevDate {
+			// found another file in the same dateFromFile as previous, delete
 			toDel = append(toDel, f)
 			continue
 		}
 
-		prevDate = date
+		prevDate = dateFromFile
 		dailyFiles += 1
 
 		if dailyFiles >= keepDaily {
@@ -254,4 +240,52 @@ func selectFilesToDel(files []string, now time.Time, keepOnWrite, keepDaily int)
 	}
 
 	return toDel
+}
+
+func groupFilesByPrefix(files []string) map[string][]string {
+	groups := make(map[string][]string, len(files))
+	for _, f := range files {
+		base := filepath.Base(f)
+
+		prefix, rest, found := strings.Cut(base, "--")
+		if !found || rest == "" || prefix == "" {
+			continue
+		}
+
+		if gr, ok := groups[prefix]; ok {
+			groups[prefix] = append(gr, f)
+		} else {
+			groups[prefix] = []string{f}
+		}
+
+	}
+
+	return groups
+}
+
+func splitNameExt(path string) (string, string) {
+	ext := filepath.Ext(path)
+	// path to dst file without extension
+	base := path[0 : len(path)-len(ext)]
+
+	return base, ext
+}
+
+func ensureBackupDirExists(dstFilePath string) error {
+	// create backup dir if not exists
+	backupDir, _ := filepath.Split(dstFilePath)
+	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(backupDir, 0o700); err != nil {
+			return fmt.Errorf("create backup dir %s error: %w", backupDir, err)
+		}
+	}
+
+	return nil
+}
+
+// closeFile close obj and log error.
+func closeFile(obj io.Closer, msg string, v ...any) {
+	if err := obj.Close(); err != nil {
+		log.Printf(msg, append(v, err))
+	}
 }
