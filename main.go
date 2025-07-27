@@ -12,7 +12,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"text/template"
@@ -60,14 +59,13 @@ type userHandler struct {
 }
 
 type userHandlers struct {
-	list []userHandler
-	mu   sync.RWMutex
+	list []*userHandler
 }
 
 func (u *userHandlers) find(name string) *userHandler {
-	for i := range u.list {
-		if u.list[i].name == name {
-			return &u.list[i]
+	for _, h := range u.list {
+		if h.name == name {
+			return h
 		}
 	}
 	return nil
@@ -163,20 +161,20 @@ func logger(f http.HandlerFunc) http.HandlerFunc {
 }
 
 func createEmpty(path string) error {
-	_, fErr := os.Stat(path)
-	if os.IsNotExist(fErr) {
-		log.Printf("creating %q\n", path)
-		twData, _ := tiddly.ReadFile(twFile)
-		wErr := os.WriteFile(path, twData, 0o600)
-		if wErr != nil {
-			return wErr
-		}
+	if _, fErr := os.Stat(path); !os.IsNotExist(fErr) {
+		return nil
 	}
+
+	log.Printf("creating %q\n", path)
+	twData, _ := tiddly.ReadFile(twFile)
+	if wErr := os.WriteFile(path, twData, 0o600); wErr != nil {
+		return wErr
+	}
+
 	return nil
 }
 
 func prompt(prompt string, secure bool) (string, error) {
-	var input string
 	fmt.Print(prompt)
 
 	if secure {
@@ -184,24 +182,25 @@ func prompt(prompt string, secure bool) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		input = string(b)
-	} else {
-		_, err := fmt.Scanln(&input)
-		if err != nil {
-			return "", err
-		}
+
+		return string(b), nil
 	}
-	return input, nil
+
+	var input string
+	if _, err := fmt.Scanln(&input); err != nil {
+		return "", err
+	}
+
+	return "", nil
 }
 
 func addHandler(u, uPath string) {
-	handlers.list = append(handlers.list, userHandler{
+	handlers.list = append(handlers.list, &userHandler{
 		name: u,
 		dav: &webdav.Handler{
 			LockSystem: webdav.NewMemLS(),
 			FileSystem: webdav.Dir(uPath),
 			Logger: func(_ *http.Request, err error) {
-				// log.Print(r)
 				if err != nil {
 					log.Print(err)
 				}
@@ -209,6 +208,189 @@ func addHandler(u, uPath string) {
 		},
 		fs: http.FileServer(http.Dir(uPath)),
 	})
+}
+
+func mainGenPass() {
+	user, err := prompt("Username: ", false)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	pass, err := prompt("Password: ", true)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(pass), 11)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	f, err := os.OpenFile(filepath.Clean(passPath), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	if _, err := fmt.Fprintf(f, "%s:%s\n", user, hash); err != nil {
+		log.Fatalln(err)
+	}
+
+	if err = f.Close(); err != nil {
+		log.Fatalln(err)
+	}
+
+	fmt.Printf("Added %q to %q\n", user, passPath)
+}
+
+func loadUsers() {
+	if _, fErr := os.Stat(passPath); os.IsNotExist(fErr) {
+		if auth == "basic" || auth == "header" {
+			fmt.Println("No .htpasswd file found!")
+			os.Exit(1)
+		}
+
+		return
+	}
+
+	p, err := os.Open(filepath.Clean(passPath))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ht := csv.NewReader(p)
+	ht.Comma = ':'
+	ht.Comment = '#'
+	ht.TrimLeadingSpace = true
+
+	entries, err := ht.ReadAll()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if err := p.Close(); err != nil {
+		log.Fatal(err)
+	}
+
+	for _, parts := range entries {
+		users[parts[0]] = parts[1]
+	}
+}
+
+func handlerAuthenticate(r *http.Request) (string, bool) {
+	if auth == "basic" {
+		user, pass, ok := r.BasicAuth()
+		return user, ok && authenticate(user, pass)
+	}
+
+	if auth == "header" {
+		const prefix = "Auth"
+
+		for name, values := range r.Header {
+			if strings.HasPrefix(name, prefix) {
+				user := strings.TrimLeft(name, prefix)
+
+				return user, authenticate(user, values[0])
+			}
+		}
+
+		return "", false
+	}
+
+	return "", true
+}
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	// Block .htpasswd, Prevent directory traversal
+	if strings.Contains(r.URL.Path, ".htpasswd") || strings.Contains(r.URL.Path, "..") {
+		http.NotFound(w, r)
+		return
+	}
+
+	user, ok := handlerAuthenticate(r)
+	if !ok {
+		w.Header().Set("WWW-Authenticate", `Basic realm="widdler"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	handler := handlers.find(user)
+	if handler == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+
+	userPath := path.Join(davDir, user)
+	fullPath := filepath.Clean(path.Join(davDir, user, r.URL.Path))
+	if !strings.HasPrefix(fullPath, userPath) {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("Resolved file: %s", fullPath)
+
+	if _, dErr := os.Stat(userPath); os.IsNotExist(dErr) {
+		if mErr := os.Mkdir(userPath, 0o700); mErr != nil {
+			http.Error(w, mErr.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if ext := filepath.Ext(r.URL.Path); ext == ".html" || ext == ".htm" {
+		// HTML files will be created or sent back
+		if err := createEmpty(fullPath); err != nil {
+			log.Println(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if r.Method == "PUT" {
+			if err := backuper.create(user, r.URL.Path); err != nil {
+				log.Println(err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		handler.dav.ServeHTTP(w, r)
+		return
+	}
+
+	// Everything else is browsable
+	entries, err := os.ReadDir(userPath)
+	if err != nil {
+		log.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(entries) > 0 {
+		if r.URL.Path == "/" {
+			// If we have entries, and are serving up /, check for
+			// index.html and redirect to that if it exists. We redirect
+			// because net/http handles index.html magically for FileServer
+			if _, fErr := os.Stat(filepath.Clean(path.Join(userPath, "index.html"))); !os.IsNotExist(fErr) {
+				http.Redirect(w, r, "/index.html", http.StatusMovedPermanently)
+				return
+			}
+		}
+
+		handler.fs.ServeHTTP(w, r)
+		return
+	}
+
+	l := Landing{URL: fmt.Sprintf("%s/wiki.html", fullListen)}
+
+	if user != "" {
+		l.User = user
+	}
+
+	if err = templ.ExecuteTemplate(w, "landing", l); err != nil {
+		log.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func main() {
@@ -219,37 +401,7 @@ func main() {
 		os.Exit(0)
 	}
 	if genHtpass {
-		user, err := prompt("Username: ", false)
-		if err != nil {
-			log.Fatalln(err)
-		}
-
-		pass, err := prompt("Password: ", true)
-		if err != nil {
-			log.Fatalln(err)
-		}
-
-		hash, err := bcrypt.GenerateFromPassword([]byte(pass), 11)
-		if err != nil {
-			log.Fatalln(err)
-		}
-
-		f, err := os.OpenFile(filepath.Clean(passPath), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-		if err != nil {
-			log.Fatalln(err)
-		}
-
-		if _, err := fmt.Fprintf(f, "%s:%s\n", user, hash); err != nil {
-			log.Fatalln(err)
-		}
-
-		err = f.Close()
-		if err != nil {
-			log.Fatalln(err)
-		}
-
-		fmt.Printf("Added %q to %q\n", user, passPath)
-
+		mainGenPass()
 		os.Exit(0)
 	}
 	pledges, _ = protect.ReducePledges(pledges, "tty")
@@ -258,37 +410,7 @@ func main() {
 	_ = protect.Unveil(passPath, "r")
 	pledges, _ = protect.ReducePledges(pledges, "unveil")
 
-	_, fErr := os.Stat(passPath)
-	if os.IsNotExist(fErr) {
-		if auth == "basic" || auth == "header" {
-			fmt.Println("No .htpasswd file found!")
-			os.Exit(1)
-		}
-	} else {
-		p, err := os.Open(filepath.Clean(passPath))
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		ht := csv.NewReader(p)
-		ht.Comma = ':'
-		ht.Comment = '#'
-		ht.TrimLeadingSpace = true
-
-		entries, err := ht.ReadAll()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		err = p.Close()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		for _, parts := range entries {
-			users[parts[0]] = parts[1]
-		}
-	}
+	loadUsers()
 
 	if auth == "basic" || auth == "header" {
 		for u := range users {
@@ -300,135 +422,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", logger(func(w http.ResponseWriter, r *http.Request) {
-		user, pass := "", ""
-		var ok bool
-
-		if strings.Contains(r.URL.Path, ".htpasswd") {
-			http.NotFound(w, r)
-			return
-		}
-
-		// Prevent directory traversal
-		if strings.Contains(r.URL.Path, "..") {
-			http.NotFound(w, r)
-			return
-		}
-
-		if auth == "basic" {
-			user, pass, ok = r.BasicAuth()
-			if !ok || !authenticate(user, pass) {
-				w.Header().Set("WWW-Authenticate", `Basic realm="widdler"`)
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-		} else if auth == "header" {
-			prefix := "Auth"
-			for name, values := range r.Header {
-				if strings.HasPrefix(name, prefix) {
-					user = strings.TrimLeft(name, prefix)
-					pass = values[0]
-					ok = true
-					break
-				}
-			}
-
-			if !ok || !authenticate(user, pass) {
-				w.Header().Set("WWW-Authenticate", `Basic realm="widdler"`)
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-		}
-
-		handlers.mu.RLock()
-		handler := handlers.find(user)
-		handlers.mu.RUnlock()
-
-		if handler == nil {
-			http.NotFound(w, r)
-			return
-		}
-
-		handler.mu.Lock()
-
-		defer handler.mu.Unlock()
-
-		userPath := path.Join(davDir, user)
-		fullPath := path.Join(davDir, user, r.URL.Path)
-		fullPath = filepath.Clean(fullPath)
-		if !strings.HasPrefix(fullPath, userPath) {
-			http.Error(w, "Bad request", http.StatusBadRequest)
-			return
-		}
-		log.Printf("Resolved file: %s", fullPath)
-
-		_, dErr := os.Stat(userPath)
-		if os.IsNotExist(dErr) {
-			mErr := os.Mkdir(userPath, 0o700)
-			if mErr != nil {
-				http.Error(w, mErr.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		isHTML, err := regexp.Match(`\.html$`, []byte(r.URL.Path))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if isHTML {
-			// HTML files will be created or sent back
-			err := createEmpty(fullPath)
-			if err != nil {
-				log.Println(err)
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if r.Method == "PUT" {
-				if err := backuper.create(user, r.URL.Path); err != nil {
-					log.Println(err)
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-			}
-			handler.dav.ServeHTTP(w, r)
-		} else {
-			// Everything else is browsable
-			entries, err := os.ReadDir(userPath)
-			if err != nil {
-				log.Println(err)
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			if len(entries) > 0 {
-				if r.URL.Path == "/" {
-					// If we have entries, and are serving up /, check for
-					// index.html and redirect to that if it exists. We redirect
-					// because net/http handles index.html magically for FileServer
-					_, fErr := os.Stat(filepath.Clean(path.Join(userPath, "index.html")))
-					if !os.IsNotExist(fErr) {
-						http.Redirect(w, r, "/index.html", http.StatusMovedPermanently)
-						return
-					}
-				}
-				handler.fs.ServeHTTP(w, r)
-			} else {
-				l := Landing{
-					URL: fmt.Sprintf("%s/wiki.html", fullListen),
-				}
-				if user != "" {
-					l.User = user
-				}
-				err = templ.ExecuteTemplate(w, "landing", l)
-				if err != nil {
-					log.Println(err)
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-				}
-			}
-		}
-	}))
+	mux.HandleFunc("/", logger(handler))
 
 	s := http.Server{
 		Handler:           mux,
