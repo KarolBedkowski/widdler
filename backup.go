@@ -193,11 +193,8 @@ func selectFilesToDel(files []string, now time.Time, keepOnWrite, keepDaily int)
 	slices.Reverse(files)
 
 	today := now.Format("20060102")
-	todayFiles := 0
-	dailyFiles := 0
 	prevDate := ""
-
-	var toDel []string
+	toKeep := make([]string, 0, len(files))
 
 	for _, f := range files {
 		sp := backupNameRe.FindStringSubmatch(f)
@@ -208,33 +205,27 @@ func selectFilesToDel(files []string, now time.Time, keepOnWrite, keepDaily int)
 		dateFromFile := sp[1]
 
 		if dateFromFile == today {
-			// found today created file; count it and delete if number > keepOnWrite
-			todayFiles += 1
-			if todayFiles > keepOnWrite {
-				toDel = append(toDel, f)
+			if keepOnWrite > 0 {
+				toKeep = append(toKeep, f)
+				keepOnWrite--
+			}
+		} else { // daily files
+			if keepDaily == 0 {
+				break
 			}
 
-			continue
+			// keep only one file from each day
+			if dateFromFile != prevDate {
+				toKeep = append(toKeep, f)
+				keepDaily--
+				prevDate = dateFromFile
+			}
 		}
+	}
 
-		// found files older than today
-
-		// more than required files found; delete it
-		if dailyFiles >= keepDaily {
-			toDel = append(toDel, f)
-			continue
-		}
-
-		if dateFromFile == prevDate {
-			// found another file in the same dateFromFile as previous, delete
-			toDel = append(toDel, f)
-			continue
-		}
-
-		prevDate = dateFromFile
-		dailyFiles += 1
-
-		if dailyFiles >= keepDaily {
+	var toDel []string
+	for _, f := range files {
+		if !slices.Contains(toKeep, f) {
 			toDel = append(toDel, f)
 		}
 	}
