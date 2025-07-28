@@ -14,7 +14,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -43,13 +43,13 @@ func (b *Backuper) start() {
 	b.enabled = b.keepDaily > 0 || b.keepOnWrite > 0
 
 	if !b.enabled {
-		log.Println("Backups disabled")
+		slog.Info("Backups disabled")
 
 		return
 	}
 
-	log.Printf("Backups enabled; dir: %q; max files: %d on write, %d daily, min age: %ds, compress: %v\n",
-		b.backupDir, b.keepOnWrite, b.keepDaily, b.interval, b.compress)
+	slog.Info(fmt.Sprintf("Backups enabled; dir: %q; max files: %d on write, %d daily, min age: %ds, compress: %v",
+		b.backupDir, b.keepOnWrite, b.keepDaily, b.interval, b.compress))
 
 	b.backupsAge = make(map[string]time.Time)
 
@@ -108,13 +108,13 @@ func (b *Backuper) backupFile(path, dstFilename string) error {
 		return nil
 	}
 
-	log.Printf("backup %s -> %s\n", path, dstFilename)
+	slog.Debug("backup file", "src", path, "dst", dstFilename)
 
 	source, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open %s for backup error: %w", path, err)
 	}
-	defer closeFile(source, "close %s error: %s", path)
+	defer closeFile(source, path)
 
 	var destination io.WriteCloser
 
@@ -122,11 +122,11 @@ func (b *Backuper) backupFile(path, dstFilename string) error {
 	if err != nil {
 		return fmt.Errorf("create backup file %s error: %w", dstFilename, err)
 	}
-	defer closeFile(destination, "close %s error: %s", dstFilename)
+	defer closeFile(destination, dstFilename)
 
 	if b.compress {
 		destination, err = gzip.NewWriterLevel(destination, gzip.BestCompression)
-		defer closeFile(destination, "close gzip error: %s")
+		defer closeFile(destination, "gzip")
 
 		if err != nil {
 			return fmt.Errorf("create gzip writer error: %w", err)
@@ -150,14 +150,14 @@ func (b *Backuper) cleanWorker() {
 		}
 	}
 
-	log.Printf("clean old backups worker started; dirs %v", usersDirs)
+	slog.Debug("clean old backups worker started", "dirs", usersDirs)
 
 	c := time.Tick(cleanTaskInterval * time.Second)
 
 	for {
 		for _, ud := range usersDirs {
 			if err := b.deleteOldBackups(ud); err != nil {
-				log.Printf("delete old backups in %q error: %s\n", ud, err)
+				slog.Error("delete old backups error", "path", ud, "err", err)
 			}
 		}
 
@@ -180,7 +180,7 @@ func (b *Backuper) deleteOldBackups(directory string) error {
 		toDel := selectFilesToDel(files, time.Now(), b.keepOnWrite, b.keepDaily)
 		// delete
 		for _, fname := range toDel {
-			log.Printf("delete old backup: %s\n", fname)
+			slog.Debug("delete old backup", "path", fname)
 
 			if err := os.Remove(fname); err != nil {
 				return fmt.Errorf("remove %q error: %w", fname, err)
@@ -283,8 +283,8 @@ func ensureBackupDirExists(dstFilePath string) error {
 }
 
 // closeFile close obj and log error.
-func closeFile(obj io.Closer, msg string, v ...any) {
+func closeFile(obj io.Closer, path string) {
 	if err := obj.Close(); err != nil {
-		log.Printf(msg, append(v, err))
+		slog.Error("close file error", "path", path, "err", err)
 	}
 }

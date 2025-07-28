@@ -7,7 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -68,9 +68,9 @@ func newUserHandler(user, pass, homedir string) *userHandler {
 		dav: &webdav.Handler{ //nolint:exhaustruct
 			LockSystem: webdav.NewMemLS(),
 			FileSystem: webdav.Dir(homedir),
-			Logger: func(_ *http.Request, err error) {
+			Logger: func(r *http.Request, err error) {
 				if err != nil {
-					log.Print(err)
+					slog.Error("handle error", "user", user, "req", r.URL, "err", err)
 				}
 			},
 		},
@@ -148,7 +148,14 @@ func initApp() {
 	flag.IntVar(&backuper.keepDaily, "backup.keep_daily", 0, "If > 0 keep given number of daily backups.")
 	flag.IntVar(&backuper.keepOnWrite, "backup.keep_on_write", 0, "If > 0 keep given number of backup created on write.)")
 	flag.IntVar(&backuper.interval, "backup.interval", defaultBackupInterval, "Minimal time between backups (in seconds)")
+
+	logLevel := flag.String("log.level", "info",
+		"Only log messages with the given severity or above. One of: [debug, info, warn, error]")
+	logFormat := flag.String("log.format", "", "Output format of log messages. One of: [logfmt, json]")
+
 	flag.Parse()
+
+	setupLogging(logLevel, logFormat)
 
 	// These are OpenBSD specific protections used to prevent unnecessary file access.
 	_ = protect.Unveil(passPath, "rwc")
@@ -161,11 +168,12 @@ func initApp() {
 
 	davDir, err = filepath.Abs(davDir)
 	if err != nil {
-		log.Fatalln(err)
+		slog.Error("check wikis dir error", "err", err)
+		os.Exit(1)
 	}
 
-	log.Printf("Wikis directory: %s\n", davDir)
-	log.Printf("Auth: %s\n", auth)
+	slog.Info("Wikis directory: " + davDir)
+	slog.Info("Auth: " + auth)
 }
 
 func logger(f http.HandlerFunc) http.HandlerFunc {
@@ -188,7 +196,7 @@ func createEmpty(path string) error {
 		return nil
 	}
 
-	log.Printf("creating %q\n", path)
+	slog.Info("creating empty wiki", "path", path)
 
 	const filePerm = 0o600
 
@@ -220,38 +228,48 @@ func prompt(prompt string, secure bool) (string, error) {
 	return input, nil
 }
 
-func mainGenPass() {
+func mainGenPass() error {
 	user, err := prompt("Username: ", false)
 	if err != nil {
-		log.Fatalln(err)
+		return fmt.Errorf("get username error: %w", err)
+	}
+
+	if user == "" {
+		return errors.New("empty user") //nolint:err113
 	}
 
 	pass, err := prompt("Password: ", true)
 	if err != nil {
-		log.Fatalln(err)
+		return fmt.Errorf("get password error: %w", err)
+	}
+
+	if pass == "" {
+		return errors.New("empty password") //nolint:err113
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(pass), 11) //nolint:mnd
 	if err != nil {
-		log.Fatalln(err)
+		return fmt.Errorf("hash password error: %w", err)
 	}
 
 	const filePerm = 0o600
 
 	f, err := os.OpenFile(filepath.Clean(passPath), os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
 	if err != nil {
-		log.Fatalln(err)
+		return fmt.Errorf("open passfile %q error: %w", passPath, err)
 	}
 
 	if _, err := fmt.Fprintf(f, "%s:%s\n", user, hash); err != nil {
-		log.Fatalln(err)
+		return fmt.Errorf("write to passfile error: %w", err)
 	}
 
 	if err = f.Close(); err != nil {
-		log.Fatalln(err)
+		return fmt.Errorf("close passfile error: %w", err)
 	}
 
 	fmt.Printf("Added %q to %q\n", user, passPath) //nolint:forbidigo
+
+	return nil
 }
 
 func loadUsers() error {
@@ -328,7 +346,7 @@ func handleHTML(w http.ResponseWriter, r *http.Request, handler *userHandler, fu
 	}
 
 	if err := createEmpty(fullPath); err != nil {
-		log.Println(err)
+		slog.Error("create empty wiki error", "path", fullPath, "user", handler.user, "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
 		return true
@@ -336,7 +354,7 @@ func handleHTML(w http.ResponseWriter, r *http.Request, handler *userHandler, fu
 
 	if r.Method == http.MethodPut {
 		if err := backuper.create(handler.user, r.URL.Path); err != nil {
-			log.Println(err)
+			slog.Error("create backup errror", "req_path", r.URL.Path, "user", handler.user, "err", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 
 			return true
@@ -351,7 +369,7 @@ func handleHTML(w http.ResponseWriter, r *http.Request, handler *userHandler, fu
 func handleBrowse(w http.ResponseWriter, r *http.Request, handler *userHandler) bool {
 	entries, err := os.ReadDir(handler.home)
 	if err != nil {
-		log.Println(err)
+		slog.Error("read dir error", "dir", handler.home, "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
 		return true
@@ -386,11 +404,12 @@ func handleLanding(w http.ResponseWriter, user string) {
 
 	templ, err := template.New("landing").Parse(landingPage)
 	if err != nil {
-		log.Fatalf("parse landing pager error: %s", err)
+		slog.Error("parse landing pager error", "err", err)
+		os.Exit(1)
 	}
 
 	if err := templ.ExecuteTemplate(w, "landing", l); err != nil {
-		log.Printf("execute template error: %s\n", err)
+		slog.Error("execute template error", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -421,7 +440,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Resolved file: %s", fullPath)
+	slog.Debug("resolved file", "fullPath", fullPath)
 
 	if err := handler.ensureHomeExists(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -451,7 +470,11 @@ func main() {
 	}
 
 	if genHtpass {
-		mainGenPass()
+		if err := mainGenPass(); err != nil {
+			fmt.Printf("generate password error: %s\n", err) //nolint:forbidigo
+			os.Exit(1)
+		}
+
 		os.Exit(0)
 	}
 
@@ -462,7 +485,8 @@ func main() {
 	pledges, _ = protect.ReducePledges(pledges, "unveil")
 
 	if err := loadUsers(); err != nil {
-		log.Fatalf("load users error: %s\n", err)
+		slog.Error("load users error:", "err", err)
+		os.Exit(1)
 	}
 
 	if auth != "basic" && auth != "header" {
@@ -479,7 +503,8 @@ func main() {
 
 	lis, err := net.Listen("tcp", listen)
 	if err != nil {
-		log.Fatalln(err)
+		slog.Error("start listen error", "err", err)
+		os.Exit(1)
 	}
 
 	if tlsCert != "" && tlsKey != "" {
@@ -491,14 +516,48 @@ func main() {
 			PreferServerCipherSuites: true,
 		}
 
-		log.Printf("Listening for HTTPS on 'https://%s'", listen)
-		log.Fatalln(srv.ServeTLS(lis, tlsCert, tlsKey))
+		slog.Info("Listening for HTTPS on 'https://" + listen + "'")
+
+		if err := srv.ServeTLS(lis, tlsCert, tlsKey); err != nil {
+			slog.Error("serve error", "err", err)
+		}
 	}
 
 	backuper.start()
 
 	fullListen = "http://" + listen
 
-	log.Printf("Listening for HTTP on 'http://%s'", listen)
-	log.Fatalln(srv.Serve(lis))
+	slog.Info("Listening for HTTP on 'http://" + listen + "'")
+
+	if err := srv.Serve(lis); err != nil {
+		slog.Error("serve error", "err", err)
+	}
+}
+
+func setupLogging(level, format *string) {
+	lev := parseLevel(level)
+	opts := &slog.HandlerOptions{Level: lev} //nolint:exhaustruct
+
+	var h slog.Handler
+
+	if format != nil && *format == "json" {
+		h = slog.NewJSONHandler(os.Stdout, opts)
+	} else {
+		h = slog.NewTextHandler(os.Stdout, opts)
+	}
+
+	slog.SetDefault(slog.New(h))
+}
+
+func parseLevel(s *string) slog.Level {
+	if s == nil {
+		return slog.LevelInfo
+	}
+
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(*s)); err != nil {
+		slog.Error("parse log level error", "level", *s, "err", err)
+	}
+
+	return level
 }
