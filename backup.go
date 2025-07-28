@@ -37,9 +37,11 @@ type Backuper struct {
 	keepDaily   int
 
 	backupsAge map[string]time.Time
+
+	davDir string
 }
 
-func (b *Backuper) start() {
+func (b *Backuper) start(users []string) {
 	b.enabled = b.keepDaily > 0 || b.keepOnWrite > 0
 
 	if !b.enabled {
@@ -53,7 +55,7 @@ func (b *Backuper) start() {
 
 	b.backupsAge = make(map[string]time.Time)
 
-	go b.cleanWorker()
+	go b.cleanWorker(users)
 }
 
 func (b *Backuper) create(user, reqPath string) error {
@@ -61,7 +63,7 @@ func (b *Backuper) create(user, reqPath string) error {
 		return nil
 	}
 
-	srcFilePath := filepath.Clean(path.Join(davDir, user, reqPath))
+	srcFilePath := filepath.Clean(path.Join(b.davDir, user, reqPath))
 	if _, err := os.Stat(srcFilePath); err != nil {
 		if os.IsNotExist(err) {
 			// file not exists
@@ -71,7 +73,7 @@ func (b *Backuper) create(user, reqPath string) error {
 		return fmt.Errorf("stat file %q error: %w", srcFilePath, err)
 	}
 
-	dstFilePath := filepath.Clean(path.Join(davDir, user, b.backupDir, reqPath))
+	dstFilePath := filepath.Clean(path.Join(b.davDir, user, b.backupDir, reqPath))
 
 	// create backup dir if not exists
 	if err := ensureBackupDirExists(dstFilePath); err != nil {
@@ -140,13 +142,13 @@ func (b *Backuper) backupFile(path, dstFilename string) error {
 	return nil
 }
 
-func (b *Backuper) cleanWorker() {
+func (b *Backuper) cleanWorker(users []string) {
 	usersDirs := make([]string, 0, len(users))
 	if len(users) == 0 {
-		usersDirs = append(usersDirs, path.Join(davDir, b.backupDir))
+		usersDirs = append(usersDirs, path.Join(b.davDir, b.backupDir))
 	} else {
 		for _, u := range users {
-			usersDirs = append(usersDirs, path.Join(davDir, u, b.backupDir))
+			usersDirs = append(usersDirs, path.Join(b.davDir, u, b.backupDir))
 		}
 	}
 
