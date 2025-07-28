@@ -44,6 +44,7 @@ func (b *Backuper) start() {
 
 	if !b.enabled {
 		log.Println("Backups disabled")
+
 		return
 	}
 
@@ -62,8 +63,12 @@ func (b *Backuper) create(user, reqPath string) error {
 
 	srcFilePath := filepath.Clean(path.Join(davDir, user, reqPath))
 	if _, err := os.Stat(srcFilePath); err != nil {
-		// file not exists
-		return nil
+		if os.IsNotExist(err) {
+			// file not exists
+			return nil
+		}
+
+		return fmt.Errorf("stat file %q error: %w", srcFilePath, err)
 	}
 
 	dstFilePath := filepath.Clean(path.Join(davDir, user, b.backupDir, reqPath))
@@ -86,7 +91,7 @@ func (b *Backuper) create(user, reqPath string) error {
 		b.backupsAge[srcFilePath] = now
 	}
 
-	// build backup file name - add postfix before extention
+	// build backup file name - add postfix before extension
 	base, ext := splitNameExt(dstFilePath)
 	dstFilename := base + "--" + now.Format("20060102_150405") + ext
 
@@ -148,6 +153,7 @@ func (b *Backuper) cleanWorker() {
 	log.Printf("clean old backups worker started; dirs %v", usersDirs)
 
 	c := time.Tick(cleanTaskInterval * time.Second)
+
 	for {
 		for _, ud := range usersDirs {
 			if err := b.deleteOldBackups(ud); err != nil {
@@ -171,11 +177,11 @@ func (b *Backuper) deleteOldBackups(directory string) error {
 	groups := groupFilesByPrefix(allFiles)
 
 	for _, files := range groups {
-
 		toDel := selectFilesToDel(files, time.Now(), b.keepOnWrite, b.keepDaily)
 		// delete
 		for _, fname := range toDel {
-			fmt.Printf("delete old backup: %s\n", fname)
+			log.Printf("delete old backup: %s\n", fname)
+
 			if err := os.Remove(fname); err != nil {
 				return fmt.Errorf("remove %q error: %w", fname, err)
 			}
@@ -196,9 +202,9 @@ func selectFilesToDel(files []string, now time.Time, keepOnWrite, keepDaily int)
 	prevDate := ""
 	toKeep := make([]string, 0, len(files))
 
-	for _, f := range files {
-		sp := backupNameRe.FindStringSubmatch(f)
-		if len(sp) < 4 {
+	for _, file := range files {
+		sp := backupNameRe.FindStringSubmatch(file)
+		if len(sp) < 4 { //nolint:mnd
 			continue
 		}
 
@@ -206,7 +212,7 @@ func selectFilesToDel(files []string, now time.Time, keepOnWrite, keepDaily int)
 
 		if dateFromFile == today {
 			if keepOnWrite > 0 {
-				toKeep = append(toKeep, f)
+				toKeep = append(toKeep, file)
 				keepOnWrite--
 			}
 		} else { // daily files
@@ -216,7 +222,7 @@ func selectFilesToDel(files []string, now time.Time, keepOnWrite, keepDaily int)
 
 			// keep only one file from each day
 			if dateFromFile != prevDate {
-				toKeep = append(toKeep, f)
+				toKeep = append(toKeep, file)
 				keepDaily--
 				prevDate = dateFromFile
 			}
@@ -224,6 +230,7 @@ func selectFilesToDel(files []string, now time.Time, keepOnWrite, keepDaily int)
 	}
 
 	var toDel []string
+
 	for _, f := range files {
 		if !slices.Contains(toKeep, f) {
 			toDel = append(toDel, f)
@@ -248,7 +255,6 @@ func groupFilesByPrefix(files []string) map[string][]string {
 		} else {
 			groups[prefix] = []string{f}
 		}
-
 	}
 
 	return groups
@@ -263,10 +269,12 @@ func splitNameExt(path string) (string, string) {
 }
 
 func ensureBackupDirExists(dstFilePath string) error {
+	const dirPerm = 0o700
+
 	// create backup dir if not exists
 	backupDir, _ := filepath.Split(dstFilePath)
 	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(backupDir, 0o700); err != nil {
+		if err := os.MkdirAll(backupDir, dirPerm); err != nil {
 			return fmt.Errorf("create backup dir %s error: %w", backupDir, err)
 		}
 	}

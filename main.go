@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"embed"
 	"encoding/csv"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -23,12 +24,6 @@ import (
 	"suah.dev/protect"
 )
 
-// Landing will be used to fill our landing template
-type Landing struct {
-	User string
-	URL  string
-}
-
 const landingPage = `
 <h1>Hello{{if .User}} {{.User}}{{end}}! Welcome to widdler!</h1>
 
@@ -43,13 +38,18 @@ const landingPage = `
 <p>After creating a wiki, this message will be replaced by a list of your wiki files.</p>
 `
 
-var (
-	twFile = "empty.html"
+const twFile = "empty.html"
 
-	//go:embed empty.html
-	tiddly embed.FS
-	templ  *template.Template
+//go:embed empty.html
+var tiddly embed.FS
+
+const (
+	AuthBasic  = "basic"
+	AuthHeader = "header"
+	AuthNone   = ""
 )
+
+// -------------------------------------------------------------------
 
 type userHandler struct {
 	mu   sync.Mutex
@@ -61,11 +61,11 @@ type userHandler struct {
 }
 
 func newUserHandler(user, pass, homedir string) *userHandler {
-	return &userHandler{
+	return &userHandler{ //nolint:exhaustruct
 		user: user,
 		pass: pass,
 		home: homedir,
-		dav: &webdav.Handler{
+		dav: &webdav.Handler{ //nolint:exhaustruct
 			LockSystem: webdav.NewMemLS(),
 			FileSystem: webdav.Dir(homedir),
 			Logger: func(_ *http.Request, err error) {
@@ -92,16 +92,22 @@ func (u *userHandler) resolveFile(file string) string {
 }
 
 func (u *userHandler) ensureHomeExists() error {
+	const homeDirPerm = 0o700
+
 	if _, err := os.Stat(u.home); os.IsNotExist(err) {
-		if err := os.Mkdir(u.home, 0o700); err != nil {
-			return err
+		if err := os.Mkdir(u.home, homeDirPerm); err != nil {
+			return fmt.Errorf("mkdir %s error: %w", u.home, err)
 		}
 	}
 
 	return nil
 }
 
+// -------------------------------------------------------------------
+
 type userHandlers map[string]*userHandler
+
+// -------------------------------------------------------------------
 
 var (
 	auth           string
@@ -121,20 +127,18 @@ var (
 
 var pledges = "stdio wpath rpath cpath tty inet dns unveil"
 
-var backuper = Backuper{}
+var backuper = Backuper{} //nolint:exhaustruct
+
+const defaultBackupInterval = 60 // sec
 
 func initApp() {
 	users = make(map[string]string)
-	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
-	if err != nil {
-		log.Fatalln(err)
-	}
 
-	flag.StringVar(&davDir, "wikis", dir, "Directory of TiddlyWikis to serve over WebDAV.")
+	flag.StringVar(&davDir, "wikis", ".", "Directory of TiddlyWikis to serve over WebDAV.")
 	flag.StringVar(&listen, "http", "localhost:8080", "Listen on")
 	flag.StringVar(&tlsCert, "tlscert", "", "TLS certificate.")
 	flag.StringVar(&tlsKey, "tlskey", "", "TLS key.")
-	flag.StringVar(&passPath, "htpass", fmt.Sprintf("%s/.htpasswd", dir), "Path to .htpasswd file..")
+	flag.StringVar(&passPath, "htpass", ".htpasswd", "Path to .htpasswd file..")
 	flag.StringVar(&auth, "auth", "none", "Enable HTTP Basic Authentication (basic, none, header).")
 	flag.BoolVar(&genHtpass, "gen", false, "Generate a .htpasswd file or add a new entry to an existing file.")
 	flag.BoolVar(&version, "v", false, "Show version and exit.")
@@ -143,7 +147,7 @@ func initApp() {
 	flag.BoolVar(&backuper.compress, "backup.compress", false, "GZIP backup files.")
 	flag.IntVar(&backuper.keepDaily, "backup.keep_daily", 0, "If > 0 keep given number of daily backups.")
 	flag.IntVar(&backuper.keepOnWrite, "backup.keep_on_write", 0, "If > 0 keep given number of backup created on write.)")
-	flag.IntVar(&backuper.interval, "backup.interval", 60, "Minimal time between backups (in seconds)")
+	flag.IntVar(&backuper.interval, "backup.interval", defaultBackupInterval, "Minimal time between backups (in seconds)")
 	flag.Parse()
 
 	// These are OpenBSD specific protections used to prevent unnecessary file access.
@@ -153,10 +157,7 @@ func initApp() {
 	_ = protect.Unveil("/etc/resolv.conf", "r")
 	_ = protect.Pledge(pledges)
 
-	templ, err = template.New("landing").Parse(landingPage)
-	if err != nil {
-		log.Fatalln(err)
-	}
+	var err error
 
 	davDir, err = filepath.Abs(davDir)
 	if err != nil {
@@ -170,7 +171,7 @@ func initApp() {
 func logger(f http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		n := time.Now()
-		fmt.Printf("%s (%s) [%s] \"%s %s\" %03d\n",
+		fmt.Printf("%s (%s) [%s] \"%s %s\" %03d\n", //nolint:forbidigo
 			r.RemoteAddr,
 			n.Format(time.RFC822Z),
 			r.Method,
@@ -188,21 +189,24 @@ func createEmpty(path string) error {
 	}
 
 	log.Printf("creating %q\n", path)
+
+	const filePerm = 0o600
+
 	twData, _ := tiddly.ReadFile(twFile)
-	if wErr := os.WriteFile(path, twData, 0o600); wErr != nil {
-		return wErr
+	if err := os.WriteFile(path, twData, filePerm); err != nil {
+		return fmt.Errorf("write file %q error: %w", path, err)
 	}
 
 	return nil
 }
 
 func prompt(prompt string, secure bool) (string, error) {
-	fmt.Print(prompt)
+	fmt.Print(prompt) //nolint:forbidigo
 
 	if secure {
 		b, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("read password error: %w", err)
 		}
 
 		return string(b), nil
@@ -210,10 +214,10 @@ func prompt(prompt string, secure bool) (string, error) {
 
 	var input string
 	if _, err := fmt.Scanln(&input); err != nil {
-		return "", err
+		return "", fmt.Errorf("read stdin error: %w", err)
 	}
 
-	return "", nil
+	return input, nil
 }
 
 func mainGenPass() {
@@ -227,12 +231,14 @@ func mainGenPass() {
 		log.Fatalln(err)
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(pass), 11)
+	hash, err := bcrypt.GenerateFromPassword([]byte(pass), 11) //nolint:mnd
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	f, err := os.OpenFile(filepath.Clean(passPath), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	const filePerm = 0o600
+
+	f, err := os.OpenFile(filepath.Clean(passPath), os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -245,23 +251,26 @@ func mainGenPass() {
 		log.Fatalln(err)
 	}
 
-	fmt.Printf("Added %q to %q\n", user, passPath)
+	fmt.Printf("Added %q to %q\n", user, passPath) //nolint:forbidigo
 }
 
-func loadUsers() {
+func loadUsers() error {
+	passPath = filepath.Clean(passPath)
+
 	if _, fErr := os.Stat(passPath); os.IsNotExist(fErr) {
-		if auth == "basic" || auth == "header" {
-			fmt.Println("No .htpasswd file found!")
-			os.Exit(1)
+		if auth == AuthBasic || auth == AuthHeader {
+			return errors.New("no password file found") //nolint:err113
 		}
 
-		return
+		return nil
 	}
 
-	p, err := os.Open(filepath.Clean(passPath))
+	p, err := os.Open(passPath)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("open users file %q error: %w", passPath, err)
 	}
+
+	defer p.Close()
 
 	ht := csv.NewReader(p)
 	ht.Comma = ':'
@@ -270,52 +279,47 @@ func loadUsers() {
 
 	entries, err := ht.ReadAll()
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	if err := p.Close(); err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("read users from %q error: %w", passPath, err)
 	}
 
 	handlers = make(map[string]*userHandler, len(entries))
 
 	for _, parts := range entries {
-		uPath := path.Join(davDir, parts[0])
+		uPath := filepath.Clean(path.Join(davDir, parts[0]))
 
 		handlers[parts[0]] = newUserHandler(parts[0], parts[1], uPath)
 	}
+
+	return nil
+}
+
+func getFirstHeaderByPrefix(h http.Header, prefix string) (string, string) {
+	for name, values := range h {
+		if strings.HasPrefix(name, prefix) {
+			return strings.TrimLeft(name, prefix), values[0]
+		}
+	}
+
+	return "", ""
 }
 
 func handlerForUser(r *http.Request) *userHandler {
-	if auth == "basic" {
-		user, pass, _ := r.BasicAuth()
-		if h, ok := handlers[user]; ok && h.authenticate(pass) {
-			return h
-		}
+	var user, pass string
 
-		return nil
+	switch auth {
+	case AuthBasic:
+		user, pass, _ = r.BasicAuth()
+	case AuthHeader:
+		user, pass = getFirstHeaderByPrefix(r.Header, "Auth")
+	default:
+		return defaultHandler
 	}
 
-	if auth == "header" {
-		const prefix = "Auth"
-
-		for name, values := range r.Header {
-			if !strings.HasPrefix(name, prefix) {
-				continue
-			}
-
-			user := strings.TrimLeft(name, prefix)
-			if h, ok := handlers[user]; ok && h.authenticate(values[0]) {
-				return h
-			}
-
-			return nil
-		}
-
-		return nil
+	if h, ok := handlers[user]; ok && h.authenticate(pass) {
+		return h
 	}
 
-	return defaultHandler
+	return nil
 }
 
 func handleHTML(w http.ResponseWriter, r *http.Request, handler *userHandler, fullPath string) bool {
@@ -330,7 +334,7 @@ func handleHTML(w http.ResponseWriter, r *http.Request, handler *userHandler, fu
 		return true
 	}
 
-	if r.Method == "PUT" {
+	if r.Method == http.MethodPut {
 		if err := backuper.create(handler.user, r.URL.Path); err != nil {
 			log.Println(err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -349,6 +353,7 @@ func handleBrowse(w http.ResponseWriter, r *http.Request, handler *userHandler) 
 	if err != nil {
 		log.Println(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+
 		return true
 	}
 
@@ -360,25 +365,32 @@ func handleBrowse(w http.ResponseWriter, r *http.Request, handler *userHandler) 
 		// If we have entries, and are serving up /, check for
 		// index.html and redirect to that if it exists. We redirect
 		// because net/http handles index.html magically for FileServer
-		if _, fErr := os.Stat(filepath.Clean(path.Join(handler.home, "index.html"))); !os.IsNotExist(fErr) {
+		if _, fErr := os.Stat(path.Join(handler.home, "index.html")); !os.IsNotExist(fErr) {
 			http.Redirect(w, r, "/index.html", http.StatusMovedPermanently)
+
 			return true
 		}
 	}
 
 	handler.fs.ServeHTTP(w, r)
+
 	return true
 }
 
 func handleLanding(w http.ResponseWriter, user string) {
-	l := Landing{URL: fmt.Sprintf("%s/wiki.html", fullListen)}
+	// Landing will be used to fill our landing template
+	l := struct {
+		User string
+		URL  string
+	}{user, fullListen + "/wiki.html"}
 
-	if user != "" {
-		l.User = user
+	templ, err := template.New("landing").Parse(landingPage)
+	if err != nil {
+		log.Fatalf("parse landing pager error: %s", err)
 	}
 
 	if err := templ.ExecuteTemplate(w, "landing", l); err != nil {
-		log.Println(err)
+		log.Printf("execute template error: %s\n", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -387,6 +399,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// Block .htpasswd, Prevent directory traversal
 	if strings.Contains(r.URL.Path, ".htpasswd") || strings.Contains(r.URL.Path, "..") {
 		http.NotFound(w, r)
+
 		return
 	}
 
@@ -394,6 +407,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	if handler == nil {
 		w.Header().Set("WWW-Authenticate", `Basic realm="widdler"`)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+
 		return
 	}
 
@@ -403,6 +417,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	fullPath := handler.resolveFile(r.URL.Path)
 	if fullPath == "" {
 		http.Error(w, "Bad request", http.StatusBadRequest)
+
 		return
 	}
 
@@ -410,6 +425,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	if err := handler.ensureHomeExists(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+
 		return
 	}
 
@@ -430,20 +446,24 @@ func main() {
 	initApp()
 
 	if version {
-		fmt.Println(build)
+		fmt.Println(build) //nolint:forbidigo
 		os.Exit(0)
 	}
+
 	if genHtpass {
 		mainGenPass()
 		os.Exit(0)
 	}
+
 	pledges, _ = protect.ReducePledges(pledges, "tty")
 
 	// drop to only read on passPath
 	_ = protect.Unveil(passPath, "r")
 	pledges, _ = protect.ReducePledges(pledges, "unveil")
 
-	loadUsers()
+	if err := loadUsers(); err != nil {
+		log.Fatalf("load users error: %s\n", err)
+	}
 
 	if auth != "basic" && auth != "header" {
 		defaultHandler = newUserHandler("", "", davDir)
@@ -452,7 +472,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", logger(handler))
 
-	s := http.Server{
+	srv := http.Server{ //nolint:exhaustruct
 		Handler:           mux,
 		ReadHeaderTimeout: 0,
 	}
@@ -463,22 +483,22 @@ func main() {
 	}
 
 	if tlsCert != "" && tlsKey != "" {
-		fullListen = fmt.Sprintf("https://%s", listen)
+		fullListen = "https://" + listen
 
-		s.TLSConfig = &tls.Config{
+		srv.TLSConfig = &tls.Config{ //nolint:exhaustruct
 			MinVersion:               tls.VersionTLS12,
 			CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
 			PreferServerCipherSuites: true,
 		}
 
 		log.Printf("Listening for HTTPS on 'https://%s'", listen)
-		log.Fatalln(s.ServeTLS(lis, tlsCert, tlsKey))
+		log.Fatalln(srv.ServeTLS(lis, tlsCert, tlsKey))
 	}
 
 	backuper.start()
 
-	fullListen = fmt.Sprintf("http://%s", listen)
+	fullListen = "http://" + listen
 
 	log.Printf("Listening for HTTP on 'http://%s'", listen)
-	log.Fatalln(s.Serve(lis))
+	log.Fatalln(srv.Serve(lis))
 }
