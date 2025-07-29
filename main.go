@@ -104,16 +104,29 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// HTML files will be created or sent back
-	if u.handleHTML(w, r, fullPath) {
+	if err := u.handleHTML(w, r, fullPath); err == nil {
+		return
+	} else if !errors.Is(err, ErrNotFound) {
+		slog.Error("handle html error", "path", fullPath, "user", u.user, "err", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
 		return
 	}
 
 	// Everything else is browsable
-	if u.handleBrowse(w, r) {
+	if err := u.handleBrowse(w, r); err == nil {
+		return
+	} else if !errors.Is(err, ErrNotFound) {
+		slog.Error("handle browse error", "path", r.URL.Path, "user", u.user, "err", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
 		return
 	}
 
-	u.handleLanding(w)
+	if err := u.handleLanding(w); err != nil {
+		slog.Error("handle landing error", "user", u.user, "err", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (u *userHandler) authenticate(pass string) bool {
@@ -132,52 +145,57 @@ func (u *userHandler) resolveFile(file string) string {
 func (u *userHandler) ensureHomeExists() error {
 	const homeDirPerm = 0o700
 
-	if _, err := os.Stat(u.home); os.IsNotExist(err) {
+	_, err := os.Stat(u.home)
+	switch {
+	case err == nil:
+	case os.IsNotExist(err):
 		if err := os.Mkdir(u.home, homeDirPerm); err != nil {
-			return fmt.Errorf("mkdir %s error: %w", u.home, err)
+			return fmt.Errorf("make home dir %q error: %w", u.home, err)
 		}
+	default:
+		return fmt.Errorf("check home dir %q error: %w", u.home, err)
 	}
 
 	return nil
 }
 
-func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPath string) bool {
+var ErrNotFound = errors.New("not found")
+
+func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPath string) error {
 	if ext := filepath.Ext(r.URL.Path); ext != ".html" && ext != ".htm" {
-		return false
+		return ErrNotFound
 	}
 
-	if err := createEmpty(fullPath); err != nil {
-		slog.Error("create empty wiki error", "path", fullPath, "user", u.user, "err", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-
-		return true
-	}
-
-	if r.Method == http.MethodPut {
-		if err := u.b.create(u.user, r.URL.Path); err != nil {
-			slog.Error("create backup errror", "req_path", r.URL.Path, "user", u.user, "err", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-
-			return true
+	_, err := os.Stat(fullPath)
+	switch {
+	case os.IsNotExist(err):
+		// file not exists, try create empty
+		if err := createEmpty(fullPath); err != nil {
+			return fmt.Errorf("create empty wiki error: %w", err)
+		}
+	case err != nil:
+		return fmt.Errorf("check file %q error: %w", fullPath, err)
+	default:
+		// no error, file exists, make backup on put
+		if r.Method == http.MethodPut {
+			if err := u.b.create(u.user, r.URL.Path); err != nil {
+				return fmt.Errorf("create backup error: %w", err)
+			}
 		}
 	}
 
 	u.dav.ServeHTTP(w, r)
 
-	return true
+	return nil
 }
 
-func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request) bool {
+func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request) error {
 	entries, err := os.ReadDir(u.home)
-	if err != nil {
-		slog.Error("read dir error", "dir", u.home, "err", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-
-		return true
-	}
-
-	if len(entries) == 0 {
-		return false
+	switch {
+	case err != nil:
+		return fmt.Errorf("read dir %q error: %w", u.home, err)
+	case len(entries) == 0:
+		return ErrNotFound
 	}
 
 	if r.URL.Path == "/" {
@@ -187,16 +205,16 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request) bool 
 		if _, fErr := os.Stat(path.Join(u.home, "index.html")); !os.IsNotExist(fErr) {
 			http.Redirect(w, r, "/index.html", http.StatusMovedPermanently)
 
-			return true
+			return nil
 		}
 	}
 
 	u.fs.ServeHTTP(w, r)
 
-	return true
+	return nil
 }
 
-func (u *userHandler) handleLanding(w http.ResponseWriter) {
+func (u *userHandler) handleLanding(w http.ResponseWriter) error {
 	// Landing will be used to fill our landing template
 	l := struct {
 		User string
@@ -205,14 +223,14 @@ func (u *userHandler) handleLanding(w http.ResponseWriter) {
 
 	templ, err := template.New("landing").Parse(landingPage)
 	if err != nil {
-		slog.Error("parse landing pager error", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("parse landing pager error: %w", err)
 	}
 
 	if err := templ.ExecuteTemplate(w, "landing", l); err != nil {
-		slog.Error("execute template error", "err", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return fmt.Errorf("execute template error: %w", err)
 	}
+
+	return nil
 }
 
 // -------------------------------------------------------------------
@@ -319,24 +337,30 @@ type Logger struct {
 }
 
 func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	n := time.Now()
-	fmt.Printf("%s (%s) [%s] \"%s %s\" %03d\n", //nolint:forbidigo
-		r.RemoteAddr,
-		n.Format(time.RFC822Z),
-		r.Method,
-		r.URL.Path,
-		r.Proto,
-		r.ContentLength,
+	rlog := slog.With(
+		"remote", r.RemoteAddr,
+		"method", r.Method,
+		"path", r.URL.Path,
+		"proto", r.Proto,
+		"content_length", r.ContentLength,
 	)
+
+	startTS := time.Now()
+
+	defer func() {
+		if err := recover(); err != nil {
+			rlog.Error("request error", "err", err, "dur", time.Since(startTS))
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("internal server error")) //nolint:errcheck
+		} else {
+			rlog.Info("request finished", "dur", time.Since(startTS))
+		}
+	}()
 
 	l.next.ServeHTTP(w, r)
 }
 
 func createEmpty(path string) error {
-	if _, fErr := os.Stat(path); !os.IsNotExist(fErr) {
-		return nil
-	}
-
 	slog.Info("creating empty wiki", "path", path)
 
 	const filePerm = 0o600
@@ -352,18 +376,21 @@ func createEmpty(path string) error {
 func prompt(prompt string, secure bool) (string, error) {
 	fmt.Print(prompt) //nolint:forbidigo
 
+	var input string
+
 	if secure {
 		b, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
 			return "", fmt.Errorf("read password error: %w", err)
 		}
 
-		return string(b), nil
+		input = string(b)
+	} else if _, err := fmt.Scanln(&input); err != nil {
+		return "", fmt.Errorf("read stdin error: %w", err)
 	}
 
-	var input string
-	if _, err := fmt.Scanln(&input); err != nil {
-		return "", fmt.Errorf("read stdin error: %w", err)
+	if input == "" {
+		return "", fmt.Errorf("empty %q", prompt) //nolint:err113
 	}
 
 	return input, nil
@@ -375,17 +402,9 @@ func mainGenPass(conf *Configuration) error {
 		return fmt.Errorf("get username error: %w", err)
 	}
 
-	if user == "" {
-		return errors.New("empty user") //nolint:err113
-	}
-
 	pass, err := prompt("Password: ", true)
 	if err != nil {
 		return fmt.Errorf("get password error: %w", err)
-	}
-
-	if pass == "" {
-		return errors.New("empty password") //nolint:err113
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(pass), 11) //nolint:mnd
