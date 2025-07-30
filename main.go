@@ -1,12 +1,14 @@
 package main
 
 import (
+	"compress/bzip2"
 	"crypto/tls"
 	"embed"
 	"encoding/csv"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"net"
@@ -40,9 +42,9 @@ const landingPage = `
 <p>After creating a wiki, this message will be replaced by a list of your wiki files.</p>
 `
 
-const twFile = "empty.html"
+const twFile = "empty.html.bz2"
 
-//go:embed empty.html
+//go:embed empty.html.bz2
 var tiddly embed.FS
 
 const (
@@ -365,9 +367,19 @@ func createEmpty(path string) error {
 
 	const filePerm = 0o600
 
-	twData, _ := tiddly.ReadFile(twFile)
-	if err := os.WriteFile(path, twData, filePerm); err != nil {
-		return fmt.Errorf("write file %q error: %w", path, err)
+	compressed, _ := tiddly.Open(twFile)
+	defer compressed.Close()
+
+	inp := bzip2.NewReader(compressed)
+
+	out, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, filePerm)
+	if err != nil {
+		return fmt.Errorf("open output file error: %w", err)
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, inp); err != nil { //nolint:gosec
+		return fmt.Errorf("write error: %w", err)
 	}
 
 	return nil
