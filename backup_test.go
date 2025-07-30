@@ -14,6 +14,8 @@ import (
 )
 
 func TestSelectToDel1(t *testing.T) {
+	t.Parallel()
+
 	files := []string{
 		"b--20250720_123456.htm",
 		"b--20250720_123000.html",
@@ -56,6 +58,8 @@ func TestSelectToDel1(t *testing.T) {
 }
 
 func TestSelectToDel2(t *testing.T) {
+	t.Parallel()
+
 	files := []string{
 		"b--20250720_123456.htm",
 		"b--20250720_123000.html",
@@ -97,6 +101,8 @@ func TestSelectToDel2(t *testing.T) {
 }
 
 func TestSelectToDel3(t *testing.T) {
+	t.Parallel()
+
 	files := []string{
 		"b--20250720_123456.htm",
 		"b--20250720_123000.html",
@@ -140,6 +146,8 @@ func TestSelectToDel3(t *testing.T) {
 }
 
 func TestGroupFiles1(t *testing.T) {
+	t.Parallel()
+
 	files := []string{
 		"b--20250720_123456.htm",
 		"ba--20250720_123000.html",
