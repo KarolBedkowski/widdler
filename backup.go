@@ -58,13 +58,12 @@ func (b *Backuper) start(users []string) {
 	go b.cleanWorker(users)
 }
 
-func (b *Backuper) create(user, reqPath string) error {
+func (b *Backuper) create(root *os.Root, srcFilePath string) error {
 	if !b.enabled {
 		return nil
 	}
 
-	srcFilePath := filepath.Clean(path.Join(b.davDir, user, reqPath))
-	if _, err := os.Stat(srcFilePath); err != nil {
+	if _, err := root.Stat(srcFilePath); err != nil {
 		if os.IsNotExist(err) {
 			// file not exists
 			return nil
@@ -73,10 +72,8 @@ func (b *Backuper) create(user, reqPath string) error {
 		return fmt.Errorf("stat file %q error: %w", srcFilePath, err)
 	}
 
-	dstFilePath := filepath.Clean(path.Join(b.davDir, user, b.backupDir, reqPath))
-
 	// create backup dir if not exists
-	if err := ensureBackupDirExists(dstFilePath); err != nil {
+	if err := ensureBackupDirExists(root, b.backupDir); err != nil {
 		return err
 	}
 
@@ -93,36 +90,39 @@ func (b *Backuper) create(user, reqPath string) error {
 		b.backupsAge[srcFilePath] = now
 	}
 
+	dstFilePath := filepath.Clean(path.Join(b.backupDir, srcFilePath))
 	// build backup file name - add postfix before extension
 	base, ext := splitNameExt(dstFilePath)
 	dstFilename := base + "--" + now.Format("20060102_150405") + ext
 
-	return b.backupFile(srcFilePath, dstFilename)
+	return b.backupFile(root, srcFilePath, dstFilename)
 }
 
-func (b *Backuper) backupFile(path, dstFilename string) error {
+func (b *Backuper) backupFile(root *os.Root, path, dstFilename string) error {
 	if b.compress {
 		dstFilename += ".gz"
 	}
 
-	if _, err := os.Stat(dstFilename); err == nil {
+	if _, err := root.Stat(dstFilename); err == nil {
 		// already exists; skip
 		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat backup destination %q error: %w", dstFilename, err)
 	}
 
 	slog.Debug("backup file", "src", path, "dst", dstFilename)
 
-	source, err := os.Open(path)
+	source, err := root.Open(path)
 	if err != nil {
-		return fmt.Errorf("open %s for backup error: %w", path, err)
+		return fmt.Errorf("open %q for backup error: %w", path, err)
 	}
 	defer closeFile(source, path)
 
 	var destination io.WriteCloser
 
-	destination, err = os.Create(dstFilename)
+	destination, err = root.Create(dstFilename)
 	if err != nil {
-		return fmt.Errorf("create backup file %s error: %w", dstFilename, err)
+		return fmt.Errorf("create backup file %q error: %w", dstFilename, err)
 	}
 	defer closeFile(destination, dstFilename)
 
@@ -270,15 +270,18 @@ func splitNameExt(path string) (string, string) {
 	return base, ext
 }
 
-func ensureBackupDirExists(dstFilePath string) error {
+func ensureBackupDirExists(root *os.Root, backupDir string) error {
 	const dirPerm = 0o700
 
 	// create backup dir if not exists
-	backupDir, _ := filepath.Split(dstFilePath)
-	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(backupDir, dirPerm); err != nil {
-			return fmt.Errorf("create backup dir %s error: %w", backupDir, err)
+	if _, err := root.Stat(backupDir); os.IsNotExist(err) {
+		if err := root.Mkdir(backupDir, dirPerm); err != nil {
+			return fmt.Errorf("create backup dir %q error: %w", backupDir, err)
 		}
+
+		slog.Info(fmt.Sprintf("created backup dir %s in %s", backupDir, root.Name()))
+	} else if err != nil {
+		return fmt.Errorf("stat backup dir %q error: %w", backupDir, err)
 	}
 
 	return nil
