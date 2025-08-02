@@ -152,6 +152,8 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPat
 	switch {
 	case os.IsNotExist(err):
 		// file not exists, try create empty
+		slog.Info("creating empty wiki", "path", fullPath, "root", u.root, "user", u.user)
+
 		if err := createEmpty(u.root, fullPath); err != nil {
 			return fmt.Errorf("create empty wiki error: %w", err)
 		}
@@ -212,6 +214,29 @@ func (u *userHandler) handleLanding(w http.ResponseWriter) error {
 
 	if err := templ.ExecuteTemplate(w, "landing", l); err != nil {
 		return fmt.Errorf("execute template error: %w", err)
+	}
+
+	return nil
+}
+
+// -------------------------------------------------------------------
+
+func createEmpty(root *os.Root, path string) error {
+	const filePerm = 0o600
+
+	compressed, _ := tiddly.Open(twFile)
+	defer compressed.Close()
+
+	inp := bzip2.NewReader(compressed)
+
+	out, err := root.OpenFile(path, os.O_RDWR|os.O_CREATE, filePerm)
+	if err != nil {
+		return fmt.Errorf("open output file error: %w", err)
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, inp); err != nil { //nolint:gosec
+		return fmt.Errorf("write error: %w", err)
 	}
 
 	return nil
@@ -316,6 +341,8 @@ func secure(path ...string) string {
 	return pledges
 }
 
+// -------------------------------------------------------------------
+
 type Logger struct {
 	next http.Handler
 }
@@ -345,28 +372,7 @@ func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	l.next.ServeHTTP(w, r)
 }
 
-func createEmpty(root *os.Root, path string) error {
-	slog.Info("creating empty wiki", "path", path, "root", root)
-
-	const filePerm = 0o600
-
-	compressed, _ := tiddly.Open(twFile)
-	defer compressed.Close()
-
-	inp := bzip2.NewReader(compressed)
-
-	out, err := root.OpenFile(path, os.O_RDWR|os.O_CREATE, filePerm)
-	if err != nil {
-		return fmt.Errorf("open output file error: %w", err)
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, inp); err != nil { //nolint:gosec
-		return fmt.Errorf("write error: %w", err)
-	}
-
-	return nil
-}
+// -------------------------------------------------------------------
 
 func prompt(prompt string, secure bool) (string, error) {
 	fmt.Print(prompt) //nolint:forbidigo
@@ -409,7 +415,7 @@ func mainGenPass(conf *Configuration) error {
 
 	const filePerm = 0o600
 
-	f, err := os.OpenFile(filepath.Clean(conf.passPath), os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
+	f, err := os.OpenFile(conf.passPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
 	if err != nil {
 		return fmt.Errorf("open passfile %q error: %w", conf.passPath, err)
 	}
