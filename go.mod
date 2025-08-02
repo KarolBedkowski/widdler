@@ -1,8 +1,8 @@
 module suah.dev/widdler
 
-go 1.23.0
+go 1.24.0
 
-toolchain go1.24.4
+toolchain go1.24
 
 require (
 	github.com/lmittmann/tint v1.1.2

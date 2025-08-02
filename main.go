@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -64,15 +66,25 @@ type userHandler struct {
 	user string
 	pass string
 	home string
+	root *os.Root
 }
 
 func newUserHandler(c *Configuration, user, pass, homedir string, backuper *Backuper) *userHandler {
+	slog.Debug("new user handler", "user", user, "homedir", homedir)
+
+	root, err := os.OpenRoot(homedir)
+	if err != nil {
+		slog.Error("open home dir failed", "user", user, "homedir", homedir, "err", err)
+		os.Exit(1)
+	}
+
 	return &userHandler{ //nolint:exhaustruct
 		c:    c,
 		b:    backuper,
 		user: user,
 		pass: pass,
 		home: homedir,
+		root: root,
 		dav: &webdav.Handler{ //nolint:exhaustruct
 			LockSystem: webdav.NewMemLS(),
 			FileSystem: webdav.Dir(homedir),
@@ -82,7 +94,7 @@ func newUserHandler(c *Configuration, user, pass, homedir string, backuper *Back
 				}
 			},
 		},
-		fs: http.FileServer(http.Dir(homedir)),
+		fs: http.FileServerFS(root.FS()),
 	}
 }
 
@@ -90,7 +102,7 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	fullPath := u.resolveFile(r.URL.Path)
+	fullPath := filepath.Clean(path.Join(".", r.URL.Path))
 	if fullPath == "" {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 
@@ -98,12 +110,6 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Debug("resolved file", "fullPath", fullPath)
-
-	if err := u.ensureHomeExists(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-
-		return
-	}
 
 	// HTML files will be created or sent back
 	if err := u.handleHTML(w, r, fullPath); err == nil {
@@ -135,32 +141,6 @@ func (u *userHandler) authenticate(pass string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(u.pass), []byte(pass)) == nil
 }
 
-func (u *userHandler) resolveFile(file string) string {
-	fullPath := filepath.Clean(path.Join(u.home, file))
-	if !strings.HasPrefix(fullPath, u.home) {
-		return ""
-	}
-
-	return fullPath
-}
-
-func (u *userHandler) ensureHomeExists() error {
-	const homeDirPerm = 0o700
-
-	_, err := os.Stat(u.home)
-	switch {
-	case err == nil:
-	case os.IsNotExist(err):
-		if err := os.Mkdir(u.home, homeDirPerm); err != nil {
-			return fmt.Errorf("make home dir %q error: %w", u.home, err)
-		}
-	default:
-		return fmt.Errorf("check home dir %q error: %w", u.home, err)
-	}
-
-	return nil
-}
-
 var ErrNotFound = errors.New("not found")
 
 func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPath string) error {
@@ -168,11 +148,11 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPat
 		return ErrNotFound
 	}
 
-	_, err := os.Stat(fullPath)
+	_, err := u.root.Stat(fullPath)
 	switch {
 	case os.IsNotExist(err):
 		// file not exists, try create empty
-		if err := createEmpty(fullPath); err != nil {
+		if err := createEmpty(u.root, fullPath); err != nil {
 			return fmt.Errorf("create empty wiki error: %w", err)
 		}
 	case err != nil:
@@ -192,7 +172,9 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPat
 }
 
 func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request) error {
-	entries, err := os.ReadDir(u.home)
+	rdfs, _ := u.root.FS().(fs.ReadDirFS)
+
+	entries, err := rdfs.ReadDir(".")
 	switch {
 	case err != nil:
 		return fmt.Errorf("read dir %q error: %w", u.home, err)
@@ -204,7 +186,7 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request) error
 		// If we have entries, and are serving up /, check for
 		// index.html and redirect to that if it exists. We redirect
 		// because net/http handles index.html magically for FileServer
-		if _, fErr := os.Stat(path.Join(u.home, "index.html")); !os.IsNotExist(fErr) {
+		if _, err := os.Stat(path.Join(u.home, "index.html")); !os.IsNotExist(err) {
 			http.Redirect(w, r, "/index.html", http.StatusMovedPermanently)
 
 			return nil
@@ -351,7 +333,8 @@ func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer func() {
 		if err := recover(); err != nil {
-			rlog.Error("request error", "err", err, "dur", time.Since(startTS))
+			rlog.Error("request error - recovered", "err", err, "dur", time.Since(startTS),
+				"stack", string(debug.Stack()))
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("internal server error")) //nolint:errcheck
 		} else {
@@ -362,8 +345,8 @@ func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	l.next.ServeHTTP(w, r)
 }
 
-func createEmpty(path string) error {
-	slog.Info("creating empty wiki", "path", path)
+func createEmpty(root *os.Root, path string) error {
+	slog.Info("creating empty wiki", "path", path, "root", root)
 
 	const filePerm = 0o600
 
@@ -372,7 +355,7 @@ func createEmpty(path string) error {
 
 	inp := bzip2.NewReader(compressed)
 
-	out, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, filePerm)
+	out, err := root.OpenFile(path, os.O_RDWR|os.O_CREATE, filePerm)
 	if err != nil {
 		return fmt.Errorf("open output file error: %w", err)
 	}
@@ -460,7 +443,6 @@ func getFirstHeaderByPrefix(h http.Header, prefix string) (string, string) {
 
 type MultiUserHandler struct {
 	c        *Configuration
-	b        *Backuper
 	handlers userHandlers
 }
 
@@ -472,18 +454,26 @@ func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h := m.handlerForUser(r)
-	if h == nil {
-		w.Header().Set("WWW-Authenticate", `Basic realm="widdler"`)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	var user, pass string
+
+	switch m.c.auth {
+	case AuthBasic:
+		user, pass, _ = r.BasicAuth()
+	case AuthHeader:
+		user, pass = getFirstHeaderByPrefix(r.Header, "Auth")
+	}
+
+	if h, ok := m.handlers[user]; ok && h.authenticate(pass) {
+		h.ServeHTTP(w, r)
 
 		return
 	}
 
-	h.ServeHTTP(w, r)
+	w.Header().Set("WWW-Authenticate", `Basic realm="widdler"`)
+	http.Error(w, "Unauthorized", http.StatusUnauthorized)
 }
 
-func (m *MultiUserHandler) loadUsers() error {
+func (m *MultiUserHandler) loadUsers(backuper *Backuper) error {
 	if _, fErr := os.Stat(m.c.passPath); os.IsNotExist(fErr) {
 		return errors.New("no password file found") //nolint:err113
 	}
@@ -508,26 +498,35 @@ func (m *MultiUserHandler) loadUsers() error {
 	m.handlers = make(map[string]*userHandler, len(entries))
 
 	for _, parts := range entries {
-		uPath := filepath.Clean(path.Join(m.c.davDir, parts[0]))
+		if parts[0] == "" { // skip entries with empty user
+			continue
+		}
 
-		m.handlers[parts[0]] = newUserHandler(m.c, parts[0], parts[1], uPath, m.b)
+		homedir := filepath.Clean(path.Join(m.c.davDir, parts[0]))
+		if err := ensureHomeExists(homedir); err != nil {
+			return fmt.Errorf("ensure home %q for user %q error: %w", parts[0], homedir, err)
+		}
+
+		m.handlers[parts[0]] = newUserHandler(m.c, parts[0], parts[1], homedir, backuper)
 	}
 
 	return nil
 }
 
-func (m *MultiUserHandler) handlerForUser(r *http.Request) *userHandler {
-	var user, pass string
+// -------------------------------------------------------------------
 
-	switch m.c.auth {
-	case AuthBasic:
-		user, pass, _ = r.BasicAuth()
-	case AuthHeader:
-		user, pass = getFirstHeaderByPrefix(r.Header, "Auth")
-	}
+func ensureHomeExists(home string) error {
+	const homeDirPerm = 0o700
 
-	if h, ok := m.handlers[user]; ok && h.authenticate(pass) {
-		return h
+	_, err := os.Stat(home)
+	switch {
+	case err == nil:
+	case os.IsNotExist(err):
+		if err := os.Mkdir(home, homeDirPerm); err != nil {
+			return fmt.Errorf("make home dir %q error: %w", home, err)
+		}
+	default:
+		return fmt.Errorf("check home dir %q error: %w", home, err)
 	}
 
 	return nil
@@ -544,8 +543,8 @@ func mainServer(conf *Configuration, backuper *Backuper) {
 	if conf.auth != "basic" && conf.auth != "header" {
 		handler = newUserHandler(conf, "", "", conf.davDir, backuper)
 	} else {
-		m := &MultiUserHandler{c: conf, b: backuper} //nolint:exhaustruct
-		if err := m.loadUsers(); err != nil {
+		m := &MultiUserHandler{c: conf} //nolint:exhaustruct
+		if err := m.loadUsers(backuper); err != nil {
 			slog.Error("load users error:", "err", err)
 			os.Exit(1)
 		}
@@ -579,12 +578,12 @@ func mainServer(conf *Configuration, backuper *Backuper) {
 			PreferServerCipherSuites: true,
 		}
 
-		if err := srv.ServeTLS(lis, conf.tlsCert, conf.tlsKey); err != nil {
-			slog.Error("serve error", "err", err)
-		}
+		err = srv.ServeTLS(lis, conf.tlsCert, conf.tlsKey)
+	} else {
+		err = srv.Serve(lis)
 	}
 
-	if err := srv.Serve(lis); err != nil {
+	if err != nil {
 		slog.Error("serve error", "err", err)
 	}
 }
