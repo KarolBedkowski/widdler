@@ -301,6 +301,7 @@ func loadConfiguration() (string, *Configuration, *Backuper, error) {
 	flag.IntVar(&backuper.keepDaily, "backup.keep_daily", 0, "If > 0 keep given number of daily backups.")
 	flag.IntVar(&backuper.keepOnWrite, "backup.keep_on_write", 0, "If > 0 keep given number of backup created on write.)")
 	flag.IntVar(&backuper.interval, "backup.interval", defaultBackupInterval, "Minimal time between backups (in seconds)")
+	flag.StringVar(&backuper.mode, "backup.mode", "", "Backup mode (file, git, git-once)")
 
 	logLevel := flag.String("log.level", "info",
 		"Only log messages with the given severity or above. One of: [debug, info, warn, error]")

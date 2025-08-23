@@ -15,6 +15,7 @@ It can be used to serve existing wikis, or to create new ones.
 - Multiple users (adding another user to the .htaccess file creates a new user
   namespace).
 - Optional TLS support.
+- Backups on file save.
 
 # Installation
 
@@ -65,3 +66,36 @@ You can disable auth all together by setting the `-auth` flag to false:
 ```
 widdler -auth=false -wikis ~/wiki
 ```
+
+
+# Backups
+
+Widdler can backup current file before write changes.
+
+Widdler support two main modes for backup (selected by `-backup.mode` argument):
+- copy files into backup directory ("file" mode)
+- put file into git repository ("git", "git-once" modes)
+
+`-backup.interval` argument allow to set minimal time (in seconds) between write changes of each file).
+
+## "File" mode
+
+"file" mode use additional parameters:
+
+* `-backup.dir` - directory for backup files (directory in user home in multi-user mode)
+* `-backup.compress` - enable file compression
+* `-backup.keep_daily` - limit number of backup files to keep; one file per day
+* `-backup.keep_on_write` - limit number of backup files created today
+
+Set `keep_daily` or `keep_on_write` if no `mode` is given enable "file" mode.
+
+Old backup files are deleted in background.
+
+## "Git*" modes
+
+"git" and "git-once" open or create if not exists git repository in wikis directory (or user home).
+Widdler not use and not require external git.
+
+"git" mode commit each change of file (if file change and after `interval` since last file write).
+
+"git-once" create only one backup on first file change each day (or since widdler start).
