@@ -31,6 +31,13 @@ import (
 
 const cleanTaskInterval = 300 // sec
 
+const (
+	backupModeDefault = ""
+	backupModeFile    = "file"
+	backupModeGIT     = "git"
+	backupModeGITOnce = "git-once"
+)
+
 type Backuper struct {
 	enabled   bool
 	compress  bool
@@ -47,7 +54,15 @@ type Backuper struct {
 }
 
 func (b *Backuper) start(users []string) {
-	b.enabled = b.keepDaily > 0 || b.keepOnWrite > 0
+	if b.mode == backupModeDefault {
+		b.mode = backupModeFile
+	}
+
+	if b.mode != backupModeGIT && b.mode != backupModeGITOnce && b.mode != backupModeFile {
+		slog.Error(fmt.Sprintf("unknown backup mode %q", b.mode))
+	}
+
+	b.enabled = b.keepDaily > 0 || b.keepOnWrite > 0 || b.mode == backupModeGIT || b.mode == backupModeGITOnce
 
 	if !b.enabled {
 		slog.Info("Backups disabled")
@@ -55,12 +70,15 @@ func (b *Backuper) start(users []string) {
 		return
 	}
 
-	slog.Info(fmt.Sprintf("Backups enabled; dir: %q; max files: %d on write, %d daily, min age: %ds, compress: %v",
-		b.backupDir, b.keepOnWrite, b.keepDaily, b.interval, b.compress))
+	slog.Info(fmt.Sprintf(
+		"Backups enabled; mode: %q; dir: %q; max files: %d on write, %d daily, min age: %ds, compress: %v",
+		b.mode, b.backupDir, b.keepOnWrite, b.keepDaily, b.interval, b.compress))
 
 	b.backupsAge = make(map[string]time.Time)
 
-	go b.cleanWorker(users)
+	if b.mode == backupModeFile {
+		go b.cleanWorker(users)
+	}
 }
 
 func (b *Backuper) create(root *os.Root, srcFilePath string) error {
@@ -77,23 +95,44 @@ func (b *Backuper) create(root *os.Root, srcFilePath string) error {
 		return fmt.Errorf("stat file %q error: %w", srcFilePath, err)
 	}
 
-	if b.interval > 0 {
+	// check is need to create backup for given name
+	if !b.needBackup(srcFilePath) {
+		return nil
+	}
+
+	defer func() { b.backupsAge[srcFilePath] = time.Now() }()
+
+	switch b.mode {
+	case backupModeGIT, backupModeGITOnce:
+		return b.createGitBackup(root, srcFilePath)
+
+	default:
+		return b.createStdBackup(root, srcFilePath)
+	}
+}
+
+func (b *Backuper) needBackup(srcFilePath string) bool {
+	if oldBackupTs, ok := b.backupsAge[srcFilePath]; ok {
 		now := time.Now()
-		// check is need to create next backup
-		if oldBackupTs, ok := b.backupsAge[srcFilePath]; ok {
-			if now.Sub(oldBackupTs) < time.Duration(b.interval)*time.Second {
-				return nil
-			}
+
+		// new day, always create backup
+		if oldBackupTs.YearDay() != now.YearDay() || now.Year() != oldBackupTs.Year() {
+			return true
 		}
 
-		b.backupsAge[srcFilePath] = now
+		// in git-once backup mode create only one backup for each file in run
+		if b.mode == "git-once" {
+			return false
+		}
+
+		// for other modes skip backup when oldbackup is not older that interval.
+		if b.interval > 0 && time.Since(oldBackupTs) < time.Duration(b.interval)*time.Second {
+			return false
+		}
 	}
 
-	if b.mode == "git" {
-		return b.createGitBackup(root, srcFilePath)
-	}
-
-	return b.createStdBackup(root, srcFilePath)
+	// no backup in current run
+	return true
 }
 
 func (b *Backuper) createStdBackup(root *os.Root, srcFilePath string) error {
