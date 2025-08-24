@@ -1,9 +1,7 @@
 package main
 
 import (
-	"compress/bzip2"
 	"crypto/tls"
-	"embed"
 	"encoding/csv"
 	"errors"
 	"flag"
@@ -44,10 +42,7 @@ const landingPage = `
 <p>After creating a wiki, this message will be replaced by a list of your wiki files.</p>
 `
 
-const twFile = "empty.html.bz2"
-
-//go:embed empty.html.bz2
-var tiddly embed.FS
+const emptyURL = "https://tiddlywiki.com/empty.html"
 
 const (
 	AuthBasic  = "basic"
@@ -224,10 +219,14 @@ func (u *userHandler) handleLanding(w http.ResponseWriter) error {
 func createEmpty(root *os.Root, path string) error {
 	const filePerm = 0o600
 
-	compressed, _ := tiddly.Open(twFile)
-	defer compressed.Close()
+	slog.Info("downloading " + emptyURL)
 
-	inp := bzip2.NewReader(compressed)
+	resp, err := http.Get(emptyURL)
+	if err != nil {
+		return fmt.Errorf("download %s error: %w", emptyURL, err)
+	}
+
+	defer resp.Body.Close()
 
 	out, err := root.OpenFile(path, os.O_RDWR|os.O_CREATE, filePerm)
 	if err != nil {
@@ -235,9 +234,11 @@ func createEmpty(root *os.Root, path string) error {
 	}
 	defer out.Close()
 
-	if _, err := io.Copy(out, inp); err != nil { //nolint:gosec
+	if _, err := io.Copy(out, resp.Body); err != nil {
 		return fmt.Errorf("write error: %w", err)
 	}
+
+	slog.Info("create empty wiki completed")
 
 	return nil
 }
