@@ -222,7 +222,7 @@ func createEmpty(root *os.Root, path string) error {
 	slog.Info("downloading " + emptyURL)
 
 	resp, err := http.Get(emptyURL)
-	if err != nil {
+	if err != nil || resp == nil {
 		return fmt.Errorf("download %s error: %w", emptyURL, err)
 	}
 
