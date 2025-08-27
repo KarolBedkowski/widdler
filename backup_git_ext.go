@@ -26,25 +26,32 @@ func (b *Backuper) openOrCreateGitRepo(root *os.Root) error {
 
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
+		// not exists, create below
 	case err != nil:
 		return fmt.Errorf("get stat of .git directory in %q error: %w", root.Name(), err)
 	case !st.IsDir():
 		return ErrInvalidGitDir
 	default:
+		// dir exists
 		return nil
 	}
 
-	// not exists, create
+	worktree := root.Name()
 
-	cmd := exec.Command("git", "init", root.Name()) //nolint:gosec
+	slog.Info("create new git repository in " + worktree)
+
+	// not exists, create
+	cmd := exec.Command("git", "init", worktree)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("can't initiate git repository in %q: %w", root.Name(), err)
+		return fmt.Errorf("can't initiate git repository in %q: %w", worktree, err)
 	}
 
 	return nil
 }
 
 func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
+	slog.Debug("backup file start (external)", "file", srcFilePath)
+
 	err := b.openOrCreateGitRepo(root)
 	if err != nil {
 		return err
@@ -56,14 +63,14 @@ func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
 	cmd.Dir = worktree
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("add file to git index error: %w", err)
+		return fmt.Errorf("add file %q to git index error: %w", srcFilePath, err)
 	}
 
 	cmd = exec.Command("git", "diff", "--cached", "--quiet")
 	cmd.Dir = worktree
 
 	if err := cmd.Run(); err == nil {
-		slog.Debug("file not modified")
+		slog.Debug("backup skipped; no changes")
 
 		return nil
 	}

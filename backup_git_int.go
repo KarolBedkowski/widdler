@@ -30,15 +30,21 @@ func (b *Backuper) openOrCreateGitRepo(root *os.Root) (*git.Repository, error) {
 		return nil, fmt.Errorf("open git repository in %q failed: %w", root.Name(), err)
 	}
 
-	repo, err = git.PlainInit(root.Name(), false)
+	worktree := root.Name()
+
+	slog.Info("create new git repository in " + worktree)
+
+	repo, err = git.PlainInit(worktree, false)
 	if err != nil {
-		return nil, fmt.Errorf("init git repository in %q failed: %w", root.Name(), err)
+		return nil, fmt.Errorf("init git repository in %q failed: %w", worktree, err)
 	}
 
 	return repo, nil
 }
 
 func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
+	slog.Debug("backup file start (internal)", "file", srcFilePath)
+
 	r, err := b.openOrCreateGitRepo(root)
 	if err != nil {
 		return err
@@ -46,7 +52,7 @@ func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
 
 	w, err := r.Worktree()
 	if err != nil {
-		return fmt.Errorf("open work tress failed: %w", err)
+		return fmt.Errorf("open worktree failed: %w", err)
 	}
 
 	if _, err = w.Add(srcFilePath); err != nil {
