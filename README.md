@@ -19,17 +19,25 @@ It can be used to serve existing wikis, or to create new ones.
 
 # Installation
 
-For Go 1.16:
 ```
-go get -u suah.dev/widdler
+go install .
 ```
 
-For Go 1.17 and up:
-```
-go install suah.dev/widdler@latest
-```
+By default for git backups is used external (system) git. To use buildin implementation compile/install with
+`-tags gitint` parameter.
+
 
 # Running
+
+Run `widdler -h` to see all options.
+
+## Single user mode
+```
+mkdir wiki
+widdler
+```
+
+## Multiuser mode
 
 ```
 mkdir wiki
@@ -39,7 +47,7 @@ widdler -gen
 Username: qbit
 Passwd: ******
 # Start the server
-./widdler
+widdler -auth=basic
 ```
 
 Now open your browser to [http://localhost:8080](http://localhost:8080).
@@ -47,25 +55,12 @@ Now open your browser to [http://localhost:8080](http://localhost:8080).
 # Creating a new TiddlyWiki
 
 Simply browse to the file name you wish to create. widdler will automatically
-create the wiki file based off the current `empty.html` TiddlyWiki version.
+create the wiki file by downloading empty wiki from https://tiddlywiki.com/empty.html.
+
 
 # Saving changes
 
 Simply hit the save button!
-
-# Updating widdler
-
-```
-go install suah.dev/widdler@latest
-```
-
-# Running without .htpasswd
-
-You can disable auth all together by setting the `-auth` flag to false:
-
-```
-widdler -auth=false -wikis ~/wiki
-```
 
 
 # Backups
@@ -91,6 +86,12 @@ Set `keep_daily` or `keep_on_write` if no `mode` is given enable "file" mode.
 
 Old backup files are deleted in background.
 
+Example:
+
+```
+widdler -backup.keep_daily 7 -backup.keep_on_write 5 -wikis ./wiki/ -backup.interval 5
+```
+
 ## "Git*" modes
 
 "git" and "git-once" open or create if not exists git repository in wikis directory (or user home).
@@ -99,3 +100,10 @@ Widdler not use and not require external git.
 "git" mode commit each change of file (if file change and after `interval` since last file write).
 
 "git-once" create only one backup on first file change each day (or since widdler start).
+
+Example:
+
+```
+widdler -wikis ./wiki/ -backup.mode git-once
+widdler -wikis ./wiki/ -backup.interval 10 -backup.mode git
+```
