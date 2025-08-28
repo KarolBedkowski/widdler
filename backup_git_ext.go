@@ -59,12 +59,16 @@ func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
 
 	worktree := root.Name()
 
+	slog.Debug("backup - add file")
+
 	cmd := exec.Command("git", "add", "--", srcFilePath)
 	cmd.Dir = worktree
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("add file %q to git index error: %w", srcFilePath, err)
 	}
+
+	slog.Debug("backup - diff")
 
 	cmd = exec.Command("git", "diff", "--cached", "--quiet")
 	cmd.Dir = worktree
@@ -75,8 +79,9 @@ func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
 		return nil
 	}
 
-	msg := "backup file " + srcFilePath + " " + time.Now().Format(time.DateTime)
+	slog.Debug("backup - commit")
 
+	msg := "backup file " + srcFilePath + " " + time.Now().Format(time.DateTime)
 	cmd = exec.Command("git", "commit", "-m", msg)
 	cmd.Dir = worktree
 

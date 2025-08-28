@@ -24,7 +24,7 @@ go install .
 ```
 
 By default for git backups is used external (system) git. To use buildin implementation compile/install with
-`-tags gitint` parameter.
+`-tags gitint` parameter. Builtin implementation may be faster on windows system.
 
 
 # Running

@@ -50,16 +50,25 @@ func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
 		return err
 	}
 
-	w, err := r.Worktree()
+	slog.Debug("backup - open worktree")
+
+	worktree, err := r.Worktree()
 	if err != nil {
 		return fmt.Errorf("open worktree failed: %w", err)
 	}
 
-	if _, err = w.Add(srcFilePath); err != nil {
+	slog.Debug("backup - add file")
+
+	if _, err = worktree.Add(srcFilePath); err != nil {
 		return fmt.Errorf("add file %q to git repository in %q failed: %w", srcFilePath, root.Name(), err)
 	}
 
-	commit, err := w.Commit("backup file "+srcFilePath+" "+time.Now().Format(time.DateTime),
+	slog.Debug("backup - commit")
+
+	// It faster to commit and handle errors than check changed files before.
+	// Esp that worktree.Status not always return useful data...
+
+	commit, err := worktree.Commit("backup file "+srcFilePath+" "+time.Now().Format(time.DateTime),
 		&git.CommitOptions{ //nolint:exhaustruct
 			Author: &object.Signature{
 				Name:  "widdler",
