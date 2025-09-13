@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/csv"
 	"errors"
@@ -22,6 +23,10 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/lmittmann/tint"
+	"github.com/mattn/go-isatty"
+	"github.com/rs/xid"
+	slogctx "github.com/veqryn/slog-context"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/net/webdav"
 	"golang.org/x/term"
@@ -85,7 +90,7 @@ func newUserHandler(c *Configuration, user, pass, homedir string, backuper *Back
 			FileSystem: webdav.Dir(homedir),
 			Logger: func(r *http.Request, err error) {
 				if err != nil {
-					slog.Error("handle error", "user", user, "req", r.URL, "err", err)
+					slog.ErrorContext(r.Context(), "handle error", "req", r.URL, "err", err)
 				}
 			},
 		},
@@ -97,6 +102,11 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
+	ctx := r.Context()
+	ctx = slogctx.Append(ctx, slog.String("user", u.user))
+
+	r = r.WithContext(ctx)
+
 	fullPath := filepath.Clean(path.Join(".", r.URL.Path))
 	if fullPath == "" {
 		http.Error(w, "Bad request", http.StatusBadRequest)
@@ -104,13 +114,13 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Debug("resolved file", "fullPath", fullPath)
+	slog.DebugContext(ctx, "resolved file", "fullPath", fullPath)
 
 	// HTML files will be created or sent back
 	if err := u.handleHTML(w, r, fullPath); err == nil {
 		return
 	} else if !errors.Is(err, ErrNotFound) {
-		slog.Error("handle html error", "path", fullPath, "user", u.user, "err", err)
+		slog.ErrorContext(ctx, "handle html error", "path", fullPath, "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
 		return
@@ -120,14 +130,14 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := u.handleBrowse(w, r); err == nil {
 		return
 	} else if !errors.Is(err, ErrNotFound) {
-		slog.Error("handle browse error", "path", r.URL.Path, "user", u.user, "err", err)
+		slog.ErrorContext(ctx, "handle browse error", "path", r.URL.Path, "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
 		return
 	}
 
 	if err := u.handleLanding(w); err != nil {
-		slog.Error("handle landing error", "user", u.user, "err", err)
+		slog.ErrorContext(ctx, "handle landing error", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -143,13 +153,15 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPat
 		return ErrNotFound
 	}
 
+	ctx := r.Context()
+
 	_, err := u.root.Stat(fullPath)
 	switch {
 	case os.IsNotExist(err):
 		// file not exists, try create empty
-		slog.Info("creating empty wiki", "path", fullPath, "root", u.root, "user", u.user)
+		slog.InfoContext(ctx, "creating empty wiki", "path", fullPath, "root", u.root)
 
-		if err := createEmpty(u.root, fullPath); err != nil {
+		if err := createEmpty(ctx, u.root, fullPath); err != nil {
 			return fmt.Errorf("create empty wiki error: %w", err)
 		}
 	case err != nil:
@@ -157,7 +169,7 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPat
 	default:
 		// no error, file exists, make backup on put
 		if r.Method == http.MethodPut {
-			if err := u.b.create(u.root, fullPath); err != nil {
+			if err := u.b.create(ctx, u.root, fullPath); err != nil {
 				return fmt.Errorf("create backup error: %w", err)
 			}
 		}
@@ -216,10 +228,10 @@ func (u *userHandler) handleLanding(w http.ResponseWriter) error {
 
 // -------------------------------------------------------------------
 
-func createEmpty(root *os.Root, path string) error {
+func createEmpty(ctx context.Context, root *os.Root, path string) error {
 	const filePerm = 0o600
 
-	slog.Info("downloading " + emptyURL)
+	slog.InfoContext(ctx, "downloading "+emptyURL)
 
 	resp, err := http.Get(emptyURL)
 	if err != nil || resp == nil {
@@ -238,7 +250,7 @@ func createEmpty(root *os.Root, path string) error {
 		return fmt.Errorf("write error: %w", err)
 	}
 
-	slog.Info("create empty wiki completed")
+	slog.InfoContext(ctx, "create empty wiki completed")
 
 	return nil
 }
@@ -306,7 +318,7 @@ func loadConfiguration() (string, *Configuration, *Backuper, error) {
 
 	logLevel := flag.String("log.level", "info",
 		"Only log messages with the given severity or above. One of: [debug, info, warn, error]")
-	logFormat := flag.String("log.format", "", "Output format of log messages. One of: [logfmt, json]")
+	logFormat := flag.String("log.format", "", "Output format of log messages. One of: [logfmt, json, tint]")
 
 	flag.Parse()
 
@@ -350,6 +362,11 @@ type Logger struct {
 }
 
 func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	requestID := xid.New().String()
+	ctx := slogctx.Prepend(r.Context(), slog.String("request_id", requestID))
+
+	r = r.WithContext(ctx)
+
 	rlog := slog.With(
 		"remote", r.RemoteAddr,
 		"method", r.Method,
@@ -362,7 +379,7 @@ func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer func() {
 		if err := recover(); err != nil {
-			rlog.Error("request error - recovered", "err", err, "dur", time.Since(startTS),
+			rlog.ErrorContext(ctx, "request error - recovered", "err", err, "dur", time.Since(startTS),
 				"stack", string(debug.Stack()))
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("internal server error")) //nolint:errcheck
@@ -632,15 +649,35 @@ func setupLogging(level, format *string) {
 	lev := parseLevel(level)
 	opts := &slog.HandlerOptions{Level: lev} //nolint:exhaustruct
 
-	var h slog.Handler
+	logFormat := "logfmt"
+	isatty := isatty.IsTerminal(os.Stderr.Fd())
 
-	if format != nil && *format == "json" {
-		h = slog.NewJSONHandler(os.Stdout, opts)
-	} else {
-		h = slog.NewTextHandler(os.Stdout, opts)
+	if format != nil && *format != "" {
+		logFormat = *format
+	} else if isatty {
+		// default for console
+		logFormat = "tint"
 	}
 
-	slog.SetDefault(slog.New(h))
+	var handler slog.Handler
+
+	switch logFormat {
+	case "tint":
+		handler = tint.NewHandler(os.Stderr, &tint.Options{ //nolint:exhaustruct
+			AddSource:  true,
+			Level:      parseLevel(level),
+			NoColor:    !isatty,
+			TimeFormat: time.TimeOnly,
+		})
+	case "json":
+		handler = slog.NewJSONHandler(os.Stdout, opts)
+	default:
+		handler = slog.NewTextHandler(os.Stdout, opts)
+	}
+
+	handler = slogctx.NewHandler(handler, nil)
+
+	slog.SetDefault(slog.New(handler))
 }
 
 func parseLevel(s *string) slog.Level {

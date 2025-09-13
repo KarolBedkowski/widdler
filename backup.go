@@ -12,6 +12,7 @@ package main
 
 import (
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -77,7 +78,7 @@ func (b *Backuper) start(users []string) {
 	}
 }
 
-func (b *Backuper) create(root *os.Root, srcFilePath string) error {
+func (b *Backuper) create(ctx context.Context, root *os.Root, srcFilePath string) error {
 	if !b.enabled {
 		return nil
 	}
@@ -100,10 +101,10 @@ func (b *Backuper) create(root *os.Root, srcFilePath string) error {
 
 	switch b.mode {
 	case backupModeGIT, backupModeGITOnce:
-		return b.createGitBackup(root, srcFilePath)
+		return b.createGitBackup(ctx, root, srcFilePath)
 
 	default:
-		return b.createStdBackup(root, srcFilePath)
+		return b.createStdBackup(ctx, root, srcFilePath)
 	}
 }
 
@@ -131,9 +132,9 @@ func (b *Backuper) needBackup(srcFilePath string) bool {
 	return true
 }
 
-func (b *Backuper) createStdBackup(root *os.Root, srcFilePath string) error {
+func (b *Backuper) createStdBackup(ctx context.Context, root *os.Root, srcFilePath string) error {
 	// create backup dir if not exists
-	if err := ensureBackupDirExists(root, b.backupDir); err != nil {
+	if err := ensureBackupDirExists(ctx, root, b.backupDir); err != nil {
 		return err
 	}
 
@@ -142,10 +143,10 @@ func (b *Backuper) createStdBackup(root *os.Root, srcFilePath string) error {
 	base, ext := splitNameExt(dstFilePath)
 	dstFilename := base + "--" + time.Now().Format("20060102_150405") + ext
 
-	return b.backupFile(root, srcFilePath, dstFilename)
+	return b.backupFile(ctx, root, srcFilePath, dstFilename)
 }
 
-func (b *Backuper) backupFile(root *os.Root, path, dstFilename string) error {
+func (b *Backuper) backupFile(ctx context.Context, root *os.Root, path, dstFilename string) error {
 	if b.compress {
 		dstFilename += ".gz"
 	}
@@ -157,13 +158,13 @@ func (b *Backuper) backupFile(root *os.Root, path, dstFilename string) error {
 		return fmt.Errorf("stat backup destination %q error: %w", dstFilename, err)
 	}
 
-	slog.Debug("backup file", "src", path, "dst", dstFilename)
+	slog.DebugContext(ctx, "backup file", "src", path, "dst", dstFilename)
 
 	source, err := root.Open(path)
 	if err != nil {
 		return fmt.Errorf("open %q for backup error: %w", path, err)
 	}
-	defer closeFile(source, path)
+	defer closeFile(ctx, source, path)
 
 	var destination io.WriteCloser
 
@@ -171,11 +172,11 @@ func (b *Backuper) backupFile(root *os.Root, path, dstFilename string) error {
 	if err != nil {
 		return fmt.Errorf("create backup file %q error: %w", dstFilename, err)
 	}
-	defer closeFile(destination, dstFilename)
+	defer closeFile(ctx, destination, dstFilename)
 
 	if b.compress {
 		destination, err = gzip.NewWriterLevel(destination, gzip.BestCompression)
-		defer closeFile(destination, "gzip")
+		defer closeFile(ctx, destination, "gzip")
 
 		if err != nil {
 			return fmt.Errorf("create gzip writer error: %w", err)
@@ -317,7 +318,7 @@ func splitNameExt(path string) (string, string) {
 	return base, ext
 }
 
-func ensureBackupDirExists(root *os.Root, backupDir string) error {
+func ensureBackupDirExists(ctx context.Context, root *os.Root, backupDir string) error {
 	const dirPerm = 0o700
 
 	// create backup dir if not exists
@@ -326,7 +327,7 @@ func ensureBackupDirExists(root *os.Root, backupDir string) error {
 			return fmt.Errorf("create backup dir %q error: %w", backupDir, err)
 		}
 
-		slog.Info(fmt.Sprintf("created backup dir %s in %s", backupDir, root.Name()))
+		slog.InfoContext(ctx, fmt.Sprintf("created backup dir %s in %s", backupDir, root.Name()))
 	} else if err != nil {
 		return fmt.Errorf("stat backup dir %q error: %w", backupDir, err)
 	}
@@ -335,8 +336,8 @@ func ensureBackupDirExists(root *os.Root, backupDir string) error {
 }
 
 // closeFile close obj and log error.
-func closeFile(obj io.Closer, path string) {
+func closeFile(ctx context.Context, obj io.Closer, path string) {
 	if err := obj.Close(); err != nil {
-		slog.Error("close file error", "path", path, "err", err)
+		slog.ErrorContext(ctx, "close file error", "path", path, "err", err)
 	}
 }

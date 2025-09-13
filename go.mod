@@ -4,6 +4,10 @@ go 1.24.0
 
 require (
 	github.com/go-git/go-git/v6 v6.0.0-20250819122726-39261590f7f3
+	github.com/lmittmann/tint v1.1.2
+	github.com/mattn/go-isatty v0.0.20
+	github.com/rs/xid v1.6.0
+	github.com/veqryn/slog-context v0.8.0
 	golang.org/x/crypto v0.41.0
 	golang.org/x/net v0.43.0
 	golang.org/x/term v0.34.0
@@ -19,6 +23,7 @@ require (
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/go-git/gcfg/v2 v2.0.2 // indirect
 	github.com/go-git/go-billy/v6 v6.0.0-20250627091229-31e2a16eef30 // indirect
+	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/pjbgf/sha1cd v0.4.0 // indirect

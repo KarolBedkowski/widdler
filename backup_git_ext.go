@@ -10,6 +10,7 @@ package main
 // Distributed under terms of the GPLv3 license.
 //
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -21,7 +22,7 @@ import (
 
 var ErrInvalidGitDir = errors.New(".git is not a directory")
 
-func (b *Backuper) openOrCreateGitRepo(root *os.Root) error {
+func (b *Backuper) openOrCreateGitRepo(ctx context.Context, root *os.Root) error {
 	st, err := root.Stat(".git")
 
 	switch {
@@ -38,7 +39,7 @@ func (b *Backuper) openOrCreateGitRepo(root *os.Root) error {
 
 	worktree := root.Name()
 
-	slog.Info("create new git repository in " + worktree)
+	slog.InfoContext(ctx, "create new git repository in "+worktree)
 
 	// not exists, create
 	cmd := exec.Command("git", "init", worktree)
@@ -49,17 +50,17 @@ func (b *Backuper) openOrCreateGitRepo(root *os.Root) error {
 	return nil
 }
 
-func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
-	slog.Debug("backup file start (external)", "file", srcFilePath)
+func (b *Backuper) createGitBackup(ctx context.Context, root *os.Root, srcFilePath string) error {
+	slog.DebugContext(ctx, "backup file start (external)", "file", srcFilePath)
 
-	err := b.openOrCreateGitRepo(root)
+	err := b.openOrCreateGitRepo(ctx, root)
 	if err != nil {
 		return err
 	}
 
 	worktree := root.Name()
 
-	slog.Debug("backup - add file")
+	slog.DebugContext(ctx, "backup - add file")
 
 	cmd := exec.Command("git", "add", "--", srcFilePath)
 	cmd.Dir = worktree
@@ -68,18 +69,18 @@ func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
 		return fmt.Errorf("add file %q to git index error: %w", srcFilePath, err)
 	}
 
-	slog.Debug("backup - diff")
+	slog.DebugContext(ctx, "backup - diff")
 
 	cmd = exec.Command("git", "diff", "--cached", "--quiet")
 	cmd.Dir = worktree
 
 	if err := cmd.Run(); err == nil {
-		slog.Debug("backup skipped; no changes")
+		slog.DebugContext(ctx, "backup skipped; no changes")
 
 		return nil
 	}
 
-	slog.Debug("backup - commit")
+	slog.DebugContext(ctx, "backup - commit")
 
 	msg := "backup file " + srcFilePath + " " + time.Now().Format(time.DateTime)
 	cmd = exec.Command("git", "commit", "-m", msg)
@@ -89,7 +90,7 @@ func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
 		return fmt.Errorf("commit error: %w", err)
 	}
 
-	slog.Debug("backup committed")
+	slog.DebugContext(ctx, "backup committed")
 
 	return nil
 }

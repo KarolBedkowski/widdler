@@ -10,6 +10,7 @@ package main
 // Distributed under terms of the GPLv3 license.
 //
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,7 +21,7 @@ import (
 	"github.com/go-git/go-git/v6/plumbing/object"
 )
 
-func (b *Backuper) openOrCreateGitRepo(root *os.Root) (*git.Repository, error) {
+func (b *Backuper) openOrCreateGitRepo(ctx context.Context, root *os.Root) (*git.Repository, error) {
 	repo, err := git.PlainOpen(root.Name())
 	if err == nil {
 		return repo, nil
@@ -32,7 +33,7 @@ func (b *Backuper) openOrCreateGitRepo(root *os.Root) (*git.Repository, error) {
 
 	worktree := root.Name()
 
-	slog.Info("create new git repository in " + worktree)
+	slog.InfoContext(ctx, "create new git repository in "+worktree)
 
 	repo, err = git.PlainInit(worktree, false)
 	if err != nil {
@@ -42,28 +43,28 @@ func (b *Backuper) openOrCreateGitRepo(root *os.Root) (*git.Repository, error) {
 	return repo, nil
 }
 
-func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
-	slog.Debug("backup file start (internal)", "file", srcFilePath)
+func (b *Backuper) createGitBackup(ctx context.Context, root *os.Root, srcFilePath string) error {
+	slog.DebugContext(ctx, "backup file start (internal)", "file", srcFilePath)
 
-	r, err := b.openOrCreateGitRepo(root)
+	r, err := b.openOrCreateGitRepo(ctx, root)
 	if err != nil {
 		return err
 	}
 
-	slog.Debug("backup - open worktree")
+	slog.DebugContext(ctx, "backup - open worktree")
 
 	worktree, err := r.Worktree()
 	if err != nil {
 		return fmt.Errorf("open worktree failed: %w", err)
 	}
 
-	slog.Debug("backup - add file")
+	slog.DebugContext(ctx, "backup - add file")
 
 	if _, err = worktree.Add(srcFilePath); err != nil {
 		return fmt.Errorf("add file %q to git repository in %q failed: %w", srcFilePath, root.Name(), err)
 	}
 
-	slog.Debug("backup - commit")
+	slog.DebugContext(ctx, "backup - commit")
 
 	// It faster to commit and handle errors than check changed files before.
 	// Esp that worktree.Status not always return useful data...
@@ -78,7 +79,7 @@ func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
 		})
 
 	if errors.Is(err, git.ErrEmptyCommit) {
-		slog.Debug("backup skipped; no changes")
+		slog.DebugContext(ctx, "backup skipped; no changes")
 
 		return nil
 	}
@@ -87,7 +88,7 @@ func (b *Backuper) createGitBackup(root *os.Root, srcFilePath string) error {
 		return fmt.Errorf("commit to git repository %q failed: %w", srcFilePath, err)
 	}
 
-	slog.Debug("backup committed", "commit", commit.String())
+	slog.DebugContext(ctx, "backup committed", "commit", commit.String())
 
 	return nil
 }
