@@ -69,11 +69,16 @@ func (b *Backuper) createGitBackup(ctx context.Context, root *os.Root, srcFilePa
 	// It faster to commit and handle errors than check changed files before.
 	// Esp that worktree.Status not always return useful data...
 
+	user, ok := ctx.Value(CtxUserKey).(string)
+	if !ok || user == "" {
+		user = "widdler"
+	}
+
 	commit, err := worktree.Commit("backup file "+srcFilePath+" "+time.Now().Format(time.DateTime),
 		&git.CommitOptions{ //nolint:exhaustruct
 			Author: &object.Signature{
-				Name:  "widdler",
-				Email: "widdler@no.email",
+				Name:  user,
+				Email: user + "@no.email",
 				When:  time.Now(),
 			},
 		})

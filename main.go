@@ -60,6 +60,8 @@ const (
 	ServerHeaderTimeout = 10 * time.Second
 )
 
+var CtxUserKey = any("ctx_user_key")
+
 // -------------------------------------------------------------------
 
 type userHandler struct {
@@ -109,7 +111,7 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	ctx = slogctx.Append(ctx, slog.String("user", u.user))
-
+	ctx = context.WithValue(ctx, CtxUserKey, u.user)
 	r = r.WithContext(ctx)
 
 	fullPath := filepath.Clean(path.Join(".", r.URL.Path))
