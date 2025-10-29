@@ -41,8 +41,11 @@ func (b *Backuper) openOrCreateGitRepo(ctx context.Context, root *os.Root) error
 
 	slog.InfoContext(ctx, "create new git repository in "+worktree)
 
+	// no cancel on request cancel
+	ctx = context.WithoutCancel(ctx)
+
 	// not exists, create
-	cmd := exec.Command("git", "init", worktree)
+	cmd := exec.CommandContext(ctx, "git", "init", worktree)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("can't initiate git repository in %q: %w", worktree, err)
 	}
@@ -62,7 +65,10 @@ func (b *Backuper) createGitBackup(ctx context.Context, root *os.Root, srcFilePa
 
 	slog.DebugContext(ctx, "backup - add file")
 
-	cmd := exec.Command("git", "add", "--", srcFilePath)
+	// no cancel on request cancel
+	ctx = context.WithoutCancel(ctx)
+
+	cmd := exec.CommandContext(ctx, "git", "add", "--", srcFilePath)
 	cmd.Dir = worktree
 
 	if err := cmd.Run(); err != nil {
@@ -71,7 +77,7 @@ func (b *Backuper) createGitBackup(ctx context.Context, root *os.Root, srcFilePa
 
 	slog.DebugContext(ctx, "backup - diff")
 
-	cmd = exec.Command("git", "diff", "--cached", "--quiet")
+	cmd = exec.CommandContext(ctx, "git", "diff", "--cached", "--quiet")
 	cmd.Dir = worktree
 
 	if err := cmd.Run(); err == nil {
@@ -83,7 +89,7 @@ func (b *Backuper) createGitBackup(ctx context.Context, root *os.Root, srcFilePa
 	slog.DebugContext(ctx, "backup - commit")
 
 	msg := "backup file " + srcFilePath + " " + time.Now().Format(time.DateTime)
-	cmd = exec.Command("git", "commit", "-m", msg)
+	cmd = exec.CommandContext(ctx, "git", "commit", "-m", msg)
 	cmd.Dir = worktree
 
 	if err := cmd.Run(); err != nil {

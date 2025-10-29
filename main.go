@@ -55,6 +55,11 @@ const (
 	AuthNone   = ""
 )
 
+const (
+	ServerReadTimeout   = 60 * time.Second
+	ServerHeaderTimeout = 10 * time.Second
+)
+
 // -------------------------------------------------------------------
 
 type userHandler struct {
@@ -233,7 +238,12 @@ func createEmpty(ctx context.Context, root *os.Root, path string) error {
 
 	slog.InfoContext(ctx, "downloading "+emptyURL)
 
-	resp, err := http.Get(emptyURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, emptyURL, http.NoBody)
+	if err != nil {
+		return fmt.Errorf("download %s error: %w", emptyURL, err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil || resp == nil {
 		return fmt.Errorf("download %s error: %w", emptyURL, err)
 	}
@@ -565,6 +575,8 @@ func mainServer(conf *Configuration, backuper *Backuper) {
 		users   []string
 	)
 
+	ctx := context.Background()
+
 	if conf.auth != "basic" && conf.auth != "header" {
 		handler = newUserHandler(conf, "", "", conf.davDir, backuper)
 	} else {
@@ -583,10 +595,13 @@ func mainServer(conf *Configuration, backuper *Backuper) {
 
 	srv := http.Server{ //nolint:exhaustruct
 		Handler:           mux,
-		ReadHeaderTimeout: 0,
+		ReadHeaderTimeout: ServerHeaderTimeout,
+		ReadTimeout:       ServerReadTimeout,
 	}
 
-	lis, err := net.Listen("tcp", conf.listen)
+	lconfig := &net.ListenConfig{} //nolint:exhaustruct
+
+	lis, err := lconfig.Listen(ctx, "tcp", conf.listen)
 	if err != nil {
 		slog.Error("start listen error", "err", err)
 		os.Exit(1)
