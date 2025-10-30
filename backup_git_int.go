@@ -74,26 +74,30 @@ func (b *Backuper) createGitBackup(ctx context.Context, root *os.Root, srcFilePa
 		user = "widdler"
 	}
 
-	commit, err := worktree.Commit("backup file "+srcFilePath+" "+time.Now().Format(time.DateTime),
-		&git.CommitOptions{ //nolint:exhaustruct
-			Author: &object.Signature{
-				Name:  user,
-				Email: user + "@no.email",
-				When:  time.Now(),
-			},
-		})
+	go func() {
+		commit, err := worktree.Commit("backup file "+srcFilePath+" "+time.Now().Format(time.DateTime),
+			&git.CommitOptions{ //nolint:exhaustruct
+				Author: &object.Signature{
+					Name:  user,
+					Email: user + "@no.email",
+					When:  time.Now(),
+				},
+			})
 
-	if errors.Is(err, git.ErrEmptyCommit) {
-		slog.DebugContext(ctx, "backup skipped; no changes")
+		if errors.Is(err, git.ErrEmptyCommit) {
+			slog.DebugContext(ctx, "backup skipped; no changes")
 
-		return nil
-	}
+			return
+		}
 
-	if err != nil {
-		return fmt.Errorf("commit to git repository %q failed: %w", srcFilePath, err)
-	}
+		if err != nil {
+			slog.ErrorContext(ctx, "commit to git repository failed", "repository", srcFilePath, "err", err)
 
-	slog.DebugContext(ctx, "backup committed", "commit", commit.String())
+			return
+		}
+
+		slog.DebugContext(ctx, "backup committed", "commit", commit.String())
+	}()
 
 	return nil
 }
