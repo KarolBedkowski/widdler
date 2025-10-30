@@ -71,7 +71,7 @@ Widdler support two main modes for backup (selected by `-backup.mode` argument):
 - copy files into backup directory ("file" mode)
 - put file into git repository ("git", "git-once" modes)
 
-`-backup.interval` argument allow to set minimal time (in seconds) between write changes of each file).
+`-backup.interval` argument set minimal time (in seconds) between write changes of each file.
 
 ## "File" mode
 
@@ -95,7 +95,6 @@ widdler -backup.keep_daily 7 -backup.keep_on_write 5 -wikis ./wiki/ -backup.inte
 ## "Git*" modes
 
 "git" and "git-once" open or create if not exists git repository in wikis directory (or user home).
-Widdler not use and not require external git.
 
 "git" mode commit each change of file (if file change and after `interval` since last file write).
 
