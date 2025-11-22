@@ -25,11 +25,18 @@ format:
 
 .PHONY: run
 run:
-	go run . -backup.keep_daily 2 -backup.keep_on_write 5 -wikis "`pwd`/wikis/" -log.level debug -backup.interval 5 -backup.mode git-once
+	go run -tags gitint . \
+		-wikis "`pwd`/wikis/" \
+		-log.level debug \
+		-backup.mode sqlite \
+		-backup.interval 5 \
+		-backup.keep_daily 2 -backup.keep_on_write 5 
+
+#-backup.mode git \
 
 .PHONY: run-multi
 run-multi:
-	go run . -backup.keep_daily 2 -backup.keep_on_write 5 -wikis "`pwd`/wikis/" -log.level debug -backup.interval 5 -backup.mode git-once \
+	go run . -backup.keep_daily 2 -backup.keep_on_write 5 -wikis "`pwd`/wikis/" -log.level debug -backup.interval 5 -backup.mode git \
 		-htpass `pwd`/.htpasswd -auth basic
 
 # vim:ft=make

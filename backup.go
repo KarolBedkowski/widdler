@@ -28,11 +28,17 @@ import (
 
 const cleanTaskInterval = 300 // sec
 
+type BackupHandler interface {
+	Create(ctx context.Context, root *os.Root, user, srcFilePath string) error
+	NeedBackup(ctx, root *os.Root, user, srcFilePath string) (bool, error)
+}
+
 const (
 	backupModeDefault = ""
 	backupModeFile    = "file"
 	backupModeGIT     = "git"
 	backupModeGITOnce = "git-once"
+	backupModeSqlite  = "sqlite"
 )
 
 type Backuper struct {
@@ -48,6 +54,8 @@ type Backuper struct {
 	backupsAge map[string]time.Time
 
 	davDir string
+
+	backuperSqlite BackuperSqlite
 }
 
 func (b *Backuper) start(users []string) {
@@ -55,11 +63,12 @@ func (b *Backuper) start(users []string) {
 		b.mode = backupModeFile
 	}
 
-	if b.mode != backupModeGIT && b.mode != backupModeGITOnce && b.mode != backupModeFile {
+	if b.mode != backupModeGIT && b.mode != backupModeGITOnce && b.mode != backupModeFile && b.mode != backupModeSqlite {
 		slog.Error(fmt.Sprintf("unknown backup mode %q", b.mode))
 	}
 
-	b.enabled = b.keepDaily > 0 || b.keepOnWrite > 0 || b.mode == backupModeGIT || b.mode == backupModeGITOnce
+	b.enabled = (b.keepDaily > 0 || b.keepOnWrite > 0 || b.mode == backupModeGIT || b.mode == backupModeGITOnce ||
+		b.mode == backupModeSqlite)
 
 	if !b.enabled {
 		slog.Info("Backups disabled")
@@ -76,9 +85,18 @@ func (b *Backuper) start(users []string) {
 	if b.mode == backupModeFile {
 		go b.cleanWorker(users)
 	}
+
+	if b.mode == backupModeSqlite {
+		var err error
+
+		b.backuperSqlite, err = newBackuperSqlite("backup.sqlite")
+		if err != nil {
+			slog.Error("create sqlite backup failed", "err", err)
+		}
+	}
 }
 
-func (b *Backuper) create(ctx context.Context, root *os.Root, srcFilePath string) error {
+func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath string) error {
 	if !b.enabled {
 		return nil
 	}
@@ -102,6 +120,9 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, srcFilePath string
 	switch b.mode {
 	case backupModeGIT, backupModeGITOnce:
 		return b.createGitBackup(ctx, root, srcFilePath)
+
+	case backupModeSqlite:
+		return b.backuperSqlite.createBackup(ctx, root, "", srcFilePath)
 
 	default:
 		return b.createStdBackup(ctx, root, srcFilePath)

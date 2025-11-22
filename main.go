@@ -176,7 +176,7 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPat
 	default:
 		// no error, file exists, make backup on put
 		if r.Method == http.MethodPut {
-			if err := u.b.create(ctx, u.root, fullPath); err != nil {
+			if err := u.b.create(ctx, u.root, u.user, fullPath); err != nil {
 				return fmt.Errorf("create backup error: %w", err)
 			}
 		}
