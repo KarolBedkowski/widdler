@@ -5,10 +5,10 @@ import (
 	"crypto/tls"
 	"encoding/csv"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"log/slog"
 	"maps"
 	"net"
@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"text/template"
@@ -27,6 +26,7 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
 	"github.com/rs/xid"
+	"github.com/urfave/cli/v3"
 	slogctx "github.com/veqryn/slog-context"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/net/webdav"
@@ -274,7 +274,7 @@ type userHandlers map[string]*userHandler
 
 // -------------------------------------------------------------------
 
-var build string
+var build = "dev"
 
 type Configuration struct {
 	auth       string
@@ -305,54 +305,39 @@ func (c *Configuration) validate() error {
 	return nil
 }
 
-const defaultBackupInterval = 60 // sec
+func loadConfiguration(cmd *cli.Command) (*Configuration, *Backuper, error) {
+	conf := Configuration{ //nolint:exhaustruct
+		davDir:   cmd.String("wikis"),
+		listen:   cmd.String("http"),
+		tlsCert:  cmd.String("tlscert"),
+		tlsKey:   cmd.String("tlskey"),
+		passPath: cmd.String("htpass"),
+		auth:     cmd.String("auth"),
+	}
 
-func loadConfiguration() (string, *Configuration, *Backuper, error) {
-	conf := Configuration{} //nolint:exhaustruct
-	backuper := Backuper{}  //nolint:exhaustruct
+	backuper := Backuper{ //nolint:exhaustruct
+		backupDir:   cmd.String("backup.dir"),
+		compress:    cmd.Bool("backup.compress"),
+		keepDaily:   cmd.Int("backup.keep_daily"),
+		keepOnWrite: cmd.Int("backup.keep_on_write"),
+		interval:    cmd.Int("backup.interval"),
+		mode:        cmd.String("backup.mode"),
+		sqliteFile:  cmd.String("backup.sqliteFile"),
+	}
 
-	var genHtpass, version bool
+	logLevel := cmd.String("log.level")
+	logFormat := cmd.String("log.format")
 
-	flag.StringVar(&conf.davDir, "wikis", ".", "Directory of TiddlyWikis to serve over WebDAV.")
-	flag.StringVar(&conf.listen, "http", "localhost:8080", "Listen on")
-	flag.StringVar(&conf.tlsCert, "tlscert", "", "TLS certificate.")
-	flag.StringVar(&conf.tlsKey, "tlskey", "", "TLS key.")
-	flag.StringVar(&conf.passPath, "htpass", ".htpasswd", "Path to .htpasswd file..")
-	flag.StringVar(&conf.auth, "auth", "none", "Enable HTTP Basic Authentication (basic, none, header).")
-	flag.BoolVar(&genHtpass, "gen", false, "Generate a .htpasswd file or add a new entry to an existing file.")
-	flag.BoolVar(&version, "v", false, "Show version and exit.")
-
-	flag.StringVar(&backuper.backupDir, "backup.dir", "backups", "Directory for backups in user directory.")
-	flag.BoolVar(&backuper.compress, "backup.compress", false, "GZIP backup files.")
-	flag.IntVar(&backuper.keepDaily, "backup.keep_daily", 0, "If > 0 keep given number of daily backups.")
-	flag.IntVar(&backuper.keepOnWrite, "backup.keep_on_write", 0, "If > 0 keep given number of backup created on write.)")
-	flag.IntVar(&backuper.interval, "backup.interval", defaultBackupInterval, "Minimal time between backups (in seconds)")
-	flag.StringVar(&backuper.mode, "backup.mode", "", "Backup mode (file, git, git-once)")
-	flag.StringVar(&backuper.sqliteFile, "backup.sqliteFile", "backup.sqlite", "Backup file for sqlite-mode")
-
-	logLevel := flag.String("log.level", "info",
-		"Only log messages with the given severity or above. One of: [debug, info, warn, error]")
-	logFormat := flag.String("log.format", "", "Output format of log messages. One of: [logfmt, json, tint]")
-
-	flag.Parse()
-
-	setupLogging(logLevel, logFormat)
+	setupLogging(&logLevel, &logFormat)
 
 	if err := conf.validate(); err != nil {
-		return "", nil, nil, err
+		return nil, nil, err
 	}
 
 	slog.Info("Wikis directory: " + conf.davDir)
 	slog.Info("Auth: " + conf.auth)
 
-	args := flag.Args()
-
-	action := "serve"
-	if len(args) > 0 {
-		action = args[0]
-	}
-
-	return action, &conf, &backuper, nil
+	return &conf, &backuper, nil
 }
 
 func secure(path ...string) string {
@@ -430,7 +415,10 @@ func prompt(prompt string, secure bool) (string, error) {
 	return input, nil
 }
 
-func mainGenPass(conf *Configuration) error {
+func mainGenPass(ctx context.Context, cmd *cli.Command) error {
+	_ = ctx
+	passPath := cmd.String("htpass")
+
 	user, err := prompt("Username: ", false)
 	if err != nil {
 		return fmt.Errorf("get username error: %w", err)
@@ -448,9 +436,9 @@ func mainGenPass(conf *Configuration) error {
 
 	const filePerm = 0o600
 
-	f, err := os.OpenFile(conf.passPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
+	f, err := os.OpenFile(passPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
 	if err != nil {
-		return fmt.Errorf("open passfile %q error: %w", conf.passPath, err)
+		return fmt.Errorf("open passfile %q error: %w", passPath, err)
 	}
 
 	if _, err := fmt.Fprintf(f, "%s:%s\n", user, hash); err != nil {
@@ -461,7 +449,7 @@ func mainGenPass(conf *Configuration) error {
 		return fmt.Errorf("close passfile error: %w", err)
 	}
 
-	fmt.Printf("Added %q to %q\n", user, conf.passPath) //nolint:forbidigo
+	fmt.Printf("Added %q to %q\n", user, passPath) //nolint:forbidigo
 
 	return nil
 }
@@ -573,13 +561,11 @@ func ensureHomeExists(home string) error {
 
 // -------------------------------------------------------------------
 
-func mainServer(conf *Configuration, backuper *Backuper) {
+func mainServer(ctx context.Context, conf *Configuration, backuper *Backuper) {
 	var (
 		handler http.Handler
 		users   []string
 	)
-
-	ctx := context.Background()
 
 	if conf.auth != "basic" && conf.auth != "header" {
 		handler = newUserHandler(conf, "", "", conf.davDir, backuper)
@@ -611,7 +597,7 @@ func mainServer(conf *Configuration, backuper *Backuper) {
 		os.Exit(1)
 	}
 
-	backuper.start(users)
+	backuper.start(ctx, users)
 
 	slog.Info("Listening on '" + conf.fullListen + "'")
 
@@ -632,65 +618,153 @@ func mainServer(conf *Configuration, backuper *Backuper) {
 	}
 }
 
-func main() {
-	action, conf, backuper, err := loadConfiguration()
-	if err != nil {
-		fmt.Println(err.Error()) //nolint:forbidigo
-		os.Exit(1)
+func main() { //nolint:funlen
+	//nolint:exhaustruct
+	cmd := &cli.Command{
+		Name:    "widdler",
+		Version: build,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "log.level",
+				Value: "info",
+				Usage: "Only log messages with the given severity or above. One of: [debug, info, warn, error]",
+			},
+			&cli.StringFlag{
+				Name:  "log.format",
+				Value: "",
+				Usage: "Output format of log messages. One of: [logfmt, json, tint]",
+			},
+		},
+		Commands: []*cli.Command{
+			{
+				Name:  "serve",
+				Usage: "start server",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "wikis", Value: ".", Usage: "Directory of TiddlyWikis to serve over WebDAV."},
+					&cli.StringFlag{Name: "http", Value: "localhost:8080", Usage: "Listen on"},
+					&cli.StringFlag{Name: "tlscert", Usage: "TLS certificate."},
+					&cli.StringFlag{Name: "tlskey", Usage: "TLS key."},
+					&cli.StringFlag{Name: "htpass", Value: ".htpasswd", Usage: "Path to .htpasswd file.."},
+					&cli.StringFlag{
+						Name:  "auth",
+						Value: "none",
+						Usage: "Enable HTTP Basic Authentication (basic, none, header).",
+					},
+					&cli.StringFlag{
+						Name:  "backup.dir",
+						Value: "backups",
+						Usage: "Directory for backups in user directory.",
+					},
+					&cli.BoolFlag{Name: "backup.compress", Value: false, Usage: "GZIP backup files."},
+					&cli.IntFlag{
+						Name:  "backup.keep_daily",
+						Value: 0,
+						Usage: "If > 0 keep given number of daily backups.",
+					},
+					&cli.IntFlag{
+						Name:  "backup.keep_on_write",
+						Value: 0,
+						Usage: "If > 0 keep given number of backup created on write.",
+					},
+					&cli.IntFlag{
+						Name:  "backup.interval",
+						Value: 30, //nolint:mnd
+						Usage: "Minimal time between backups (in seconds)",
+					},
+					&cli.StringFlag{Name: "backup.mode", Value: "", Usage: "Backup mode (file, git, git-once)"},
+					&cli.StringFlag{
+						Name:  "backup.sqliteFile",
+						Value: "backup.sqlite",
+						Usage: "Backup file for sqlite-mode",
+					},
+				},
+				Action: serverCmd,
+			},
+			{
+				Name: "genHtpass",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:     "htpass",
+						Value:    ".htpasswd",
+						Usage:    "Path to .htpasswd file.",
+						Required: true,
+					},
+				},
+				Action: mainGenPass,
+			},
+			{
+				Name: "list-backups",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:     "file",
+						Value:    "backup.sqlite",
+						Usage:    "Path to backup file.",
+						Required: true,
+					},
+					&cli.StringFlag{Name: "username", Usage: "Username for filter backups"},
+				},
+				Action: listSqliteBackups,
+			},
+			{
+				Name: "restore-backup",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:     "file",
+						Value:    "backup.sqlite",
+						Usage:    "Path to backup file.",
+						Required: true,
+					},
+					&cli.Int64Flag{Name: "backupid", Usage: "Backup ID to restore"},
+				},
+				Action: restoreSqliteBackups,
+			},
+		},
 	}
 
-	pledges := secure(conf.davDir, conf.passPath)
-
-	switch action {
-	case "version":
-		fmt.Println(build) //nolint:forbidigo
-	case "genHtpass":
-		if err := mainGenPass(conf); err != nil {
-			fmt.Printf("generate password error: %s\n", err) //nolint:forbidigo
-			os.Exit(1)
-		}
-
-	case "list-backups":
-		if err := listSqliteBackups(backuper.sqliteFile); err != nil {
-			fmt.Printf("list sqlite backups error: %s\n", err) //nolint:forbidigo
-			os.Exit(1)
-		}
-
-	case "restore-backup":
-		if err := restoreSqliteBackups(backuper.sqliteFile); err != nil {
-			fmt.Printf("list sqlite backups error: %s\n", err) //nolint:forbidigo
-			os.Exit(1)
-		}
-
-	case "serve":
-		pledges, _ = protect.ReducePledges(pledges, "tty")
-
-		// drop to only read on passPath
-		_ = protect.Unveil(conf.passPath, "r")
-		_, _ = protect.ReducePledges(pledges, "unveil")
-
-		backuper.davDir = conf.davDir
-
-		mainServer(conf, backuper)
+	if err := cmd.Run(context.Background(), os.Args); err != nil {
+		log.Fatal(err)
 	}
 }
 
 // -------------------------------------------------------------------
 
-func listSqliteBackups(dbfilename string) error {
-	username := ""
-
-	if len(flag.Args()) > 1 {
-		username = flag.Args()[1]
+func serverCmd(ctx context.Context, cmd *cli.Command) error {
+	conf, backuper, err := loadConfiguration(cmd)
+	if err != nil {
+		return err
 	}
 
-	res, err := ListSqliteBackups(context.Background(), dbfilename, username)
+	pledges := secure(conf.davDir, conf.passPath)
+	pledges, _ = protect.ReducePledges(pledges, "tty")
+
+	// drop to only read on passPath
+	_ = protect.Unveil(conf.passPath, "r")
+	_, _ = protect.ReducePledges(pledges, "unveil")
+
+	backuper.davDir = conf.davDir
+
+	mainServer(ctx, conf, backuper)
+
+	return nil
+}
+
+// -------------------------------------------------------------------
+
+func listSqliteBackups(ctx context.Context, cmd *cli.Command) error {
+	dbfilename := cmd.String("file")
+	if dbfilename == "" {
+		return errors.New("missing database filename") //nolint:err113
+	}
+
+	username := cmd.String("username")
+
+	res, err := ListSqliteBackups(ctx, dbfilename, username)
 	if err != nil {
 		return err
 	}
 
 	for _, r := range res {
-		fmt.Println(r.ToString())
+		fmt.Println(r.ToString()) //nolint:forbidigo
 	}
 
 	return nil
@@ -698,22 +772,23 @@ func listSqliteBackups(dbfilename string) error {
 
 // -------------------------------------------------------------------
 
-func restoreSqliteBackups(dbfilename string) error {
-	if len(flag.Args()) < 2 {
-		return errors.New("missing backupid")
+func restoreSqliteBackups(ctx context.Context, cmd *cli.Command) error {
+	dbfilename := cmd.String("file")
+	if dbfilename == "" {
+		return errors.New("missing database filename") //nolint:err113
 	}
 
-	backupid, err := strconv.Atoi(flag.Args()[1])
-	if err != nil {
-		return fmt.Errorf("invalid backupid: %w", err)
+	backupid := cmd.Int64("backupid")
+	if backupid <= 0 {
+		return errors.New("missing or invalid backupid") //nolint:err113
 	}
 
-	res, err := RestoreSqliteBackup(context.Background(), dbfilename, int64(backupid))
+	res, err := RestoreSqliteBackup(ctx, dbfilename, backupid)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(string(res))
+	fmt.Println(string(res)) //nolint:forbidigo
 
 	return nil
 }

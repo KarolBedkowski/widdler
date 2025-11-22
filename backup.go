@@ -59,12 +59,15 @@ type Backuper struct {
 	backuperSqlite BackuperSqlite
 }
 
-func (b *Backuper) start(users []string) {
+func (b *Backuper) start(ctx context.Context, users []string) {
+	_ = ctx
+
 	if b.mode == backupModeDefault {
 		b.mode = backupModeFile
 	}
 
-	if b.mode != backupModeGIT && b.mode != backupModeGITOnce && b.mode != backupModeFile && b.mode != backupModeSqlite {
+	if b.mode != backupModeGIT && b.mode != backupModeGITOnce && b.mode != backupModeFile &&
+		b.mode != backupModeSqlite {
 		slog.Error(fmt.Sprintf("unknown backup mode %q", b.mode))
 	}
 

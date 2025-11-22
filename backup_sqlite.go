@@ -115,7 +115,13 @@ func (b BackuperSqlite) getPrevContent(ctx context.Context, username, file strin
 	return string(content), backupid, nil
 }
 
-func (b BackuperSqlite) storeContent(ctx context.Context, username, file string, isfull bool, content []byte, parentID int64) error {
+func (b BackuperSqlite) storeContent(
+	ctx context.Context,
+	username, file string,
+	isfull bool,
+	content []byte,
+	parentID int64,
+) error {
 	compressed := 0
 	storefull := 0
 
