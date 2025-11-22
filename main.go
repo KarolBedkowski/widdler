@@ -48,7 +48,7 @@ func (c *Configuration) validate() error {
 	return nil
 }
 
-func loadConfiguration(cmd *cli.Command) (*Configuration, *Backuper, error) {
+func loadConfiguration(ctx context.Context, cmd *cli.Command) (*Configuration, *Backuper, error) {
 	conf := Configuration{ //nolint:exhaustruct
 		davDir:   cmd.String("wikis"),
 		listen:   cmd.String("http"),
@@ -58,14 +58,9 @@ func loadConfiguration(cmd *cli.Command) (*Configuration, *Backuper, error) {
 		auth:     cmd.String("auth"),
 	}
 
-	backuper := Backuper{ //nolint:exhaustruct
-		backupDir:   cmd.String("backup.dir"),
-		compress:    cmd.Bool("backup.compress"),
-		keepDaily:   cmd.Int("backup.keep_daily"),
-		keepOnWrite: cmd.Int("backup.keep_on_write"),
-		interval:    cmd.Int("backup.interval"),
-		mode:        cmd.String("backup.mode"),
-		sqliteFile:  cmd.String("backup.sqliteFile"),
+	backuper, err := newBackuper(ctx, cmd)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	logLevel := cmd.String("log.level")
@@ -82,6 +77,8 @@ func loadConfiguration(cmd *cli.Command) (*Configuration, *Backuper, error) {
 
 	return &conf, &backuper, nil
 }
+
+// -------------------------------------------------------------------
 
 func secure(path ...string) string {
 	pledges := "stdio wpath rpath cpath tty inet dns unveil"
@@ -203,12 +200,12 @@ func main() { //nolint:funlen
 					&cli.BoolFlag{Name: "backup.compress", Value: false, Usage: "GZIP backup files."},
 					&cli.IntFlag{
 						Name:  "backup.keep_daily",
-						Value: 0,
+						Value: 7, //nolint:mnd
 						Usage: "If > 0 keep given number of daily backups.",
 					},
 					&cli.IntFlag{
 						Name:  "backup.keep_on_write",
-						Value: 0,
+						Value: 7, //nolint:mnd
 						Usage: "If > 0 keep given number of backup created on write.",
 					},
 					&cli.IntFlag{
@@ -216,11 +213,11 @@ func main() { //nolint:funlen
 						Value: 30, //nolint:mnd
 						Usage: "Minimal time between backups (in seconds)",
 					},
-					&cli.StringFlag{Name: "backup.mode", Value: "", Usage: "Backup mode (file, git, git-once)"},
+					&cli.StringFlag{Name: "backup.mode", Value: "", Usage: "Backup mode (file, git, git-once, sqlite)"},
 					&cli.StringFlag{
-						Name:  "backup.sqliteFile",
+						Name:  "backup.sqlite_file",
 						Value: "backup.sqlite",
-						Usage: "Backup file for sqlite-mode",
+						Usage: "Backup file for 'sqlite' backup mode",
 					},
 				},
 				Action: serverCmd,
@@ -274,7 +271,7 @@ func main() { //nolint:funlen
 // -------------------------------------------------------------------
 
 func serverCmd(ctx context.Context, cmd *cli.Command) error {
-	conf, backuper, err := loadConfiguration(cmd)
+	conf, backuper, err := loadConfiguration(ctx, cmd)
 	if err != nil {
 		return err
 	}
@@ -285,8 +282,6 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 	// drop to only read on passPath
 	_ = protect.Unveil(conf.passPath, "r")
 	_, _ = protect.ReducePledges(pledges, "unveil")
-
-	backuper.davDir = conf.davDir
 
 	mainServer(ctx, conf, backuper)
 

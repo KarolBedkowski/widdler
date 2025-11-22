@@ -1,5 +1,4 @@
 //go:build !gitint
-// +build !gitint
 
 package main
 
@@ -22,38 +21,11 @@ import (
 
 var ErrInvalidGitDir = errors.New(".git is not a directory")
 
-func (b *Backuper) openOrCreateGitRepo(ctx context.Context, root *os.Root) error {
-	st, err := root.Stat(".git")
+type BackuperGit struct{}
 
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		// not exists, create below
-	case err != nil:
-		return fmt.Errorf("get stat of .git directory in %q error: %w", root.Name(), err)
-	case !st.IsDir():
-		return ErrInvalidGitDir
-	default:
-		// dir exists
-		return nil
-	}
+var _ BackupHandler = &BackuperGit{}
 
-	worktree := root.Name()
-
-	slog.InfoContext(ctx, "create new git repository in "+worktree)
-
-	// no cancel on request cancel
-	ctx = context.WithoutCancel(ctx)
-
-	// not exists, create
-	cmd := exec.CommandContext(ctx, "git", "init", worktree)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("can't initiate git repository in %q: %w", worktree, err)
-	}
-
-	return nil
-}
-
-func (b *Backuper) createGitBackup(ctx context.Context, root *os.Root, srcFilePath string) error {
+func (b *BackuperGit) Create(ctx context.Context, root *os.Root, username, srcFilePath string) error {
 	slog.DebugContext(ctx, "backup file start (external)", "file", srcFilePath)
 
 	err := b.openOrCreateGitRepo(ctx, root)
@@ -97,6 +69,41 @@ func (b *Backuper) createGitBackup(ctx context.Context, root *os.Root, srcFilePa
 	}
 
 	slog.DebugContext(ctx, "backup committed")
+
+	return nil
+}
+
+func (b BackuperGit) Clean(ctx context.Context, users []string) error { //nolint:revive
+	return nil
+}
+
+func (b *BackuperGit) openOrCreateGitRepo(ctx context.Context, root *os.Root) error {
+	st, err := root.Stat(".git")
+
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		// not exists, create below
+	case err != nil:
+		return fmt.Errorf("get stat of .git directory in %q error: %w", root.Name(), err)
+	case !st.IsDir():
+		return ErrInvalidGitDir
+	default:
+		// dir exists
+		return nil
+	}
+
+	worktree := root.Name()
+
+	slog.InfoContext(ctx, "create new git repository in "+worktree)
+
+	// no cancel on request cancel
+	ctx = context.WithoutCancel(ctx)
+
+	// not exists, create
+	cmd := exec.CommandContext(ctx, "git", "init", worktree)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("can't initiate git repository in %q: %w", worktree, err)
+	}
 
 	return nil
 }

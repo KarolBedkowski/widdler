@@ -22,17 +22,19 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const maxFileSize = 1024 * 1024 * 128 // 128 MB
+
 type BackuperSqlite struct {
 	db *sql.DB
 }
 
-func newBackuperSqlite(dbfilename string) (BackuperSqlite, error) {
+var _ BackupHandler = &BackuperSqlite{nil}
+
+func newBackuperSqlite(ctx context.Context, dbfilename string) (BackuperSqlite, error) {
 	conn, err := sql.Open("sqlite", dbfilename)
 	if err != nil {
 		return BackuperSqlite{}, fmt.Errorf("open database file failed: %w", err)
 	}
-
-	ctx := context.Background()
 
 	_, err = conn.ExecContext(ctx,
 		"CREATE TABLE IF NOT EXISTS backups "+
@@ -46,7 +48,7 @@ func newBackuperSqlite(dbfilename string) (BackuperSqlite, error) {
 	return BackuperSqlite{conn}, nil
 }
 
-func (b BackuperSqlite) createBackup(ctx context.Context, root *os.Root, username, file string) error {
+func (b BackuperSqlite) Create(ctx context.Context, root *os.Root, username, file string) error {
 	lastFullContent, parentID, err := b.getPrevContent(ctx, username, file)
 	if err != nil {
 		return fmt.Errorf("read prev backup failed: %w", err)
@@ -79,6 +81,10 @@ func (b BackuperSqlite) createBackup(ctx context.Context, root *os.Root, usernam
 
 	slog.DebugContext(ctx, "backup created", "full", isfull, "len", len(newContentB))
 
+	return nil
+}
+
+func (b BackuperSqlite) Clean(ctx context.Context, users []string) error { //nolint:revive
 	return nil
 }
 
@@ -174,7 +180,7 @@ func decompressContent(content []byte) ([]byte, error) {
 
 	var bufout bytes.Buffer
 
-	_, err := io.Copy(&bufout, zr)
+	_, err := io.CopyN(&bufout, zr, maxFileSize)
 	if err != nil {
 		return nil, fmt.Errorf("compress content failed: %w", err)
 	}
@@ -245,7 +251,7 @@ func ListSqliteBackups(ctx context.Context, dbfilename, username string) ([]Sqli
 	return backups, nil
 }
 
-func RestoreSqliteBackup(ctx context.Context, dbfilename string, backupid int64) ([]byte, error) {
+func RestoreSqliteBackup(ctx context.Context, dbfilename string, backupid int64) ([]byte, error) { //nolint:cyclop
 	conn, err := sql.Open("sqlite", dbfilename)
 	if err != nil {
 		return nil, fmt.Errorf("open database file failed: %w", err)

@@ -1,5 +1,4 @@
 //go:build gitint
-// +build gitint
 
 package main
 
@@ -21,30 +20,12 @@ import (
 	"github.com/go-git/go-git/v6/plumbing/object"
 )
 
-func (b *Backuper) openOrCreateGitRepo(ctx context.Context, root *os.Root) (*git.Repository, error) {
-	repo, err := git.PlainOpen(root.Name())
-	if err == nil {
-		return repo, nil
-	}
+type BackuperGit struct{}
 
-	if !errors.Is(err, git.ErrRepositoryNotExists) {
-		return nil, fmt.Errorf("open git repository in %q failed: %w", root.Name(), err)
-	}
+var _ BackupHandler = &BackuperGit{}
 
-	worktree := root.Name()
-
-	slog.InfoContext(ctx, "create new git repository in "+worktree)
-
-	repo, err = git.PlainInit(worktree, false)
-	if err != nil {
-		return nil, fmt.Errorf("init git repository in %q failed: %w", worktree, err)
-	}
-
-	return repo, nil
-}
-
-func (b *Backuper) createGitBackup(ctx context.Context, root *os.Root, srcFilePath string) error {
-	slog.DebugContext(ctx, "backup file start (internal)", "file", srcFilePath)
+func (b BackuperGit) Create(ctx context.Context, root *os.Root, username, srcFilePath string) error {
+	slog.DebugContext(ctx, "backup file start (internal)", "file", srcFilePath, "username", username)
 
 	r, err := b.openOrCreateGitRepo(ctx, root)
 	if err != nil {
@@ -100,4 +81,30 @@ func (b *Backuper) createGitBackup(ctx context.Context, root *os.Root, srcFilePa
 	}()
 
 	return nil
+}
+
+func (b BackuperGit) Clean(ctx context.Context, users []string) error { //nolint:revive
+	return nil
+}
+
+func (b BackuperGit) openOrCreateGitRepo(ctx context.Context, root *os.Root) (*git.Repository, error) {
+	repo, err := git.PlainOpen(root.Name())
+	if err == nil {
+		return repo, nil
+	}
+
+	if !errors.Is(err, git.ErrRepositoryNotExists) {
+		return nil, fmt.Errorf("open git repository in %q failed: %w", root.Name(), err)
+	}
+
+	worktree := root.Name()
+
+	slog.InfoContext(ctx, "create new git repository in "+worktree)
+
+	repo, err = git.PlainInit(worktree, false)
+	if err != nil {
+		return nil, fmt.Errorf("init git repository in %q failed: %w", worktree, err)
+	}
+
+	return repo, nil
 }
