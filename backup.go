@@ -85,6 +85,8 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 		return backuper, fmt.Errorf("unknown backup mode %q", backuper.mode) //nolint:err113
 	}
 
+	slog.Info("backup enabled", "backup_mode", backuper.mode)
+
 	return backuper, nil
 }
 

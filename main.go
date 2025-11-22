@@ -7,7 +7,6 @@ import (
 	"log"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/urfave/cli/v3"
 	"golang.org/x/crypto/bcrypt"
@@ -18,65 +17,6 @@ import (
 // -------------------------------------------------------------------
 
 var build = "dev"
-
-type Configuration struct {
-	auth       string
-	davDir     string
-	listen     string
-	passPath   string
-	tlsCert    string
-	tlsKey     string
-	fullListen string
-}
-
-func (c *Configuration) validate() error {
-	var err error
-
-	c.davDir, err = filepath.Abs(c.davDir)
-	if err != nil {
-		return fmt.Errorf("check wikis dir %q error: %w", c.davDir, err)
-	}
-
-	c.passPath = filepath.Clean(c.passPath)
-
-	if c.tlsCert != "" && c.tlsKey != "" {
-		c.fullListen = "https://" + c.listen
-	} else {
-		c.fullListen = "http://" + c.listen
-	}
-
-	return nil
-}
-
-func loadConfiguration(ctx context.Context, cmd *cli.Command) (*Configuration, *Backuper, error) {
-	conf := Configuration{ //nolint:exhaustruct
-		davDir:   cmd.String("wikis"),
-		listen:   cmd.String("http"),
-		tlsCert:  cmd.String("tlscert"),
-		tlsKey:   cmd.String("tlskey"),
-		passPath: cmd.String("htpass"),
-		auth:     cmd.String("auth"),
-	}
-
-	backuper, err := newBackuper(ctx, cmd)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	logLevel := cmd.String("log.level")
-	logFormat := cmd.String("log.format")
-
-	setupLogging(&logLevel, &logFormat)
-
-	if err := conf.validate(); err != nil {
-		return nil, nil, err
-	}
-
-	slog.Info("Wikis directory: " + conf.davDir)
-	slog.Info("Auth: " + conf.auth)
-
-	return &conf, &backuper, nil
-}
 
 // -------------------------------------------------------------------
 
@@ -223,7 +163,7 @@ func main() { //nolint:funlen
 				Action: serverCmd,
 			},
 			{
-				Name: "genHtpass",
+				Name: "gen-htpass",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:     "htpass",
@@ -271,19 +211,31 @@ func main() { //nolint:funlen
 // -------------------------------------------------------------------
 
 func serverCmd(ctx context.Context, cmd *cli.Command) error {
-	conf, backuper, err := loadConfiguration(ctx, cmd)
+	setupLogging(cmd.String("log.level"), cmd.String("log.format"))
+
+	server := newServer(cmd)
+	if err := server.Validate(); err != nil {
+		return err
+	}
+
+	slog.Info("Wikis directory: " + server.davDir)
+	slog.Info("Auth: " + server.auth)
+
+	backuper, err := newBackuper(ctx, cmd)
 	if err != nil {
 		return err
 	}
 
-	pledges := secure(conf.davDir, conf.passPath)
+	pledges := secure(server.davDir, server.passPath)
 	pledges, _ = protect.ReducePledges(pledges, "tty")
 
 	// drop to only read on passPath
-	_ = protect.Unveil(conf.passPath, "r")
+	_ = protect.Unveil(server.passPath, "r")
 	_, _ = protect.ReducePledges(pledges, "unveil")
 
-	mainServer(ctx, conf, backuper)
+	if err := server.Start(ctx, &backuper); err != nil {
+		return fmt.Errorf("serve error: %w", err)
+	}
 
 	return nil
 }

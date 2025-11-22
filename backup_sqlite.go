@@ -22,7 +22,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const maxFileSize = 1024 * 1024 * 128 // 128 MB
+const (
+	maxFileSize            = 1024 * 1024 * 128            // 128 MB
+	createNextFullInterval = time.Duration(8) * time.Hour // create full backup every 8h
+)
 
 type BackuperSqlite struct {
 	db *sql.DB
@@ -36,11 +39,11 @@ func newBackuperSqlite(ctx context.Context, dbfilename string) (BackuperSqlite, 
 		return BackuperSqlite{}, fmt.Errorf("open database file failed: %w", err)
 	}
 
-	_, err = conn.ExecContext(ctx,
-		"CREATE TABLE IF NOT EXISTS backups "+
-			" (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, filename TEXT, ts DATETIME, "+
-			"isfull INTEGER, compressed INTEGER, parent INTEGER, content BLOB);"+
-			"CREATE INDEX IF NOT EXISTS backups_idx ON backups (username, filename, isfull, ts)")
+	_, err = conn.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS backups (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT,
+			filename TEXT, ts DATETIME, isfull INTEGER, compressed INTEGER, parent INTEGER,
+			content BLOB);
+		CREATE INDEX IF NOT EXISTS backups_idx ON backups (username, filename, isfull, ts);`)
 	if err != nil {
 		return BackuperSqlite{}, fmt.Errorf("init database failed: %w", err)
 	}
@@ -95,14 +98,14 @@ func (b BackuperSqlite) getPrevContent(ctx context.Context, username, file strin
 		backupid   int64
 	)
 
-	now := time.Now().Truncate(24 * time.Hour).Unix() //nolint:mnd
-
-	err := b.db.QueryRowContext(ctx,
-		"SELECT id, compressed, content FROM backups "+
-			"WHERE username=? AND filename=? AND isfull=1 AND ts > ? "+
-			"ORDER BY ts DESC LIMIT 1",
-		username, file, now).
+	maxFullTs := time.Now().Add(-createNextFullInterval)
+	err := b.db.QueryRowContext(ctx, `
+			SELECT id, compressed, content FROM backups
+			WHERE username=? AND filename=? AND isfull=1 AND ts > ?
+			ORDER BY ts DESC LIMIT 1`,
+		username, file, maxFullTs.Unix()).
 		Scan(&backupid, &compressed, &content)
+
 	if errors.Is(err, sql.ErrNoRows) || len(content) == 0 {
 		return "", 0, nil
 	} else if err != nil {
@@ -148,9 +151,9 @@ func (b BackuperSqlite) storeContent(
 		dbparentid.Int64 = 0
 	}
 
-	_, err := b.db.ExecContext(ctx,
-		"INSERT INTO backups (username, filename, ts, isfull, content, compressed, parent) "+
-			"VALUES (?, ?, ?, ?, ?, ?, ?)",
+	_, err := b.db.ExecContext(ctx, `
+			INSERT INTO backups (username, filename, ts, isfull, content, compressed, parent)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		username, file, time.Now().Unix(), storefull, content, compressed, dbparentid)
 	if err != nil {
 		return fmt.Errorf("insert new content failed: %w", err)
@@ -181,7 +184,7 @@ func decompressContent(content []byte) ([]byte, error) {
 	var bufout bytes.Buffer
 
 	_, err := io.CopyN(&bufout, zr, maxFileSize)
-	if err != nil {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("compress content failed: %w", err)
 	}
 
@@ -265,10 +268,10 @@ func RestoreSqliteBackup(ctx context.Context, dbfilename string, backupid int64)
 		parentCompressed       sql.NullInt32
 	)
 
-	err = conn.QueryRowContext(ctx,
-		"SELECT b.compressed, b.content, b.isfull, b.ts, pb.compressed, pb.content "+
-			"FROM backups b LEFT JOIN backups pb ON b.parent = pb.id "+
-			"WHERE b.id=?",
+	err = conn.QueryRowContext(ctx, `
+			SELECT b.compressed, b.content, b.isfull, b.ts, pb.compressed, pb.content
+			FROM backups b LEFT JOIN backups pb ON b.parent = pb.id
+			WHERE b.id=?`,
 		backupid).
 		Scan(&compressed, &content, &isfull, &ts, &parentCompressed, &parentContent)
 	if errors.Is(err, sql.ErrNoRows) || len(content) == 0 {

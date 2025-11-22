@@ -13,15 +13,15 @@ import (
 	slogctx "github.com/veqryn/slog-context"
 )
 
-func setupLogging(level, format *string) {
+func setupLogging(level, format string) {
 	lev := parseLevel(level)
 	opts := &slog.HandlerOptions{Level: lev} //nolint:exhaustruct
 
 	logFormat := "logfmt"
 	isatty := isatty.IsTerminal(os.Stderr.Fd())
 
-	if format != nil && *format != "" {
-		logFormat = *format
+	if format != "" {
+		logFormat = format
 	} else if isatty {
 		// default for console
 		logFormat = "tint"
@@ -48,14 +48,14 @@ func setupLogging(level, format *string) {
 	slog.SetDefault(slog.New(handler))
 }
 
-func parseLevel(s *string) slog.Level {
-	if s == nil {
+func parseLevel(s string) slog.Level {
+	if s == "" {
 		return slog.LevelInfo
 	}
 
 	var level slog.Level
-	if err := level.UnmarshalText([]byte(*s)); err != nil {
-		slog.Error("parse log level error", "level", *s, "err", err)
+	if err := level.UnmarshalText([]byte(s)); err != nil {
+		slog.Error("parse log level error", "level", s, "err", err)
 	}
 
 	return level
