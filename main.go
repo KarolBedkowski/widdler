@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"text/template"
@@ -327,6 +328,7 @@ func loadConfiguration() (string, *Configuration, *Backuper, error) {
 	flag.IntVar(&backuper.keepOnWrite, "backup.keep_on_write", 0, "If > 0 keep given number of backup created on write.)")
 	flag.IntVar(&backuper.interval, "backup.interval", defaultBackupInterval, "Minimal time between backups (in seconds)")
 	flag.StringVar(&backuper.mode, "backup.mode", "", "Backup mode (file, git, git-once)")
+	flag.StringVar(&backuper.sqliteFile, "backup.sqliteFile", "backup.sqlite", "Backup file for sqlite-mode")
 
 	logLevel := flag.String("log.level", "info",
 		"Only log messages with the given severity or above. One of: [debug, info, warn, error]")
@@ -343,11 +345,11 @@ func loadConfiguration() (string, *Configuration, *Backuper, error) {
 	slog.Info("Wikis directory: " + conf.davDir)
 	slog.Info("Auth: " + conf.auth)
 
+	args := flag.Args()
+
 	action := "serve"
-	if version {
-		action = "version"
-	} else if genHtpass {
-		action = "genHtpass"
+	if len(args) > 0 {
+		action = args[0]
 	}
 
 	return action, &conf, &backuper, nil
@@ -647,6 +649,19 @@ func main() {
 			fmt.Printf("generate password error: %s\n", err) //nolint:forbidigo
 			os.Exit(1)
 		}
+
+	case "list-backups":
+		if err := listSqliteBackups(backuper.sqliteFile); err != nil {
+			fmt.Printf("list sqlite backups error: %s\n", err) //nolint:forbidigo
+			os.Exit(1)
+		}
+
+	case "restore-backup":
+		if err := restoreSqliteBackups(backuper.sqliteFile); err != nil {
+			fmt.Printf("list sqlite backups error: %s\n", err) //nolint:forbidigo
+			os.Exit(1)
+		}
+
 	case "serve":
 		pledges, _ = protect.ReducePledges(pledges, "tty")
 
@@ -658,6 +673,49 @@ func main() {
 
 		mainServer(conf, backuper)
 	}
+}
+
+// -------------------------------------------------------------------
+
+func listSqliteBackups(dbfilename string) error {
+	username := ""
+
+	if len(flag.Args()) > 1 {
+		username = flag.Args()[1]
+	}
+
+	res, err := ListSqliteBackups(context.Background(), dbfilename, username)
+	if err != nil {
+		return err
+	}
+
+	for _, r := range res {
+		fmt.Println(r.ToString())
+	}
+
+	return nil
+}
+
+// -------------------------------------------------------------------
+
+func restoreSqliteBackups(dbfilename string) error {
+	if len(flag.Args()) < 2 {
+		return errors.New("missing backupid")
+	}
+
+	backupid, err := strconv.Atoi(flag.Args()[1])
+	if err != nil {
+		return fmt.Errorf("invalid backupid: %w", err)
+	}
+
+	res, err := RestoreSqliteBackup(context.Background(), dbfilename, int64(backupid))
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(string(res))
+
+	return nil
 }
 
 // -------------------------------------------------------------------

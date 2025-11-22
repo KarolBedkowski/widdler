@@ -55,6 +55,7 @@ type Backuper struct {
 
 	davDir string
 
+	sqliteFile     string
 	backuperSqlite BackuperSqlite
 }
 
@@ -89,7 +90,7 @@ func (b *Backuper) start(users []string) {
 	if b.mode == backupModeSqlite {
 		var err error
 
-		b.backuperSqlite, err = newBackuperSqlite("backup.sqlite")
+		b.backuperSqlite, err = newBackuperSqlite(b.sqliteFile)
 		if err != nil {
 			slog.Error("create sqlite backup failed", "err", err)
 		}
