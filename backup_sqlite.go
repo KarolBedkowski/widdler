@@ -414,8 +414,8 @@ func RestoreSqliteBackup( //nolint:cyclop,funlen
 			FROM backups b LEFT JOIN backups pb ON b.parent = pb.id
 			WHERE b.id=?`,
 		backupid).
-		Scan(&compressed, &content, &isfull, &ts, &parentCompressed, &parentContent)
-	if errors.Is(err, sql.ErrNoRows) || len(content) == 0 {
+		Scan(&compressed, &content, &isfull, &ts, &parentCompressed, &parentContent, &parentID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errors.New("backup not found") //nolint:err113
 	} else if err != nil {
 		return nil, fmt.Errorf("get last full content failed: %w", err)

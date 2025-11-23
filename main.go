@@ -173,10 +173,9 @@ func main() { //nolint:funlen
 				Name: "list-backups",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:     "file",
-						Value:    "backup.sqlite",
-						Usage:    "Path to backup file.",
-						Required: true,
+						Name:  "file",
+						Value: "backup.sqlite",
+						Usage: "Path to backup file.",
 					},
 					&cli.StringFlag{Name: "username", Usage: "Username for filter backups"},
 				},
@@ -186,12 +185,11 @@ func main() { //nolint:funlen
 				Name: "restore-backup",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:     "file",
-						Value:    "backup.sqlite",
-						Usage:    "Path to backup file.",
-						Required: true,
+						Name:  "file",
+						Value: "backup.sqlite",
+						Usage: "Path to backup file.",
 					},
-					&cli.Int64Flag{Name: "backupid", Usage: "Backup ID to restore"},
+					&cli.Int64Flag{Name: "backupid", Usage: "Backup ID to restore", Required: true},
 				},
 				Action: restoreSqliteBackups,
 			},
