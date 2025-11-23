@@ -65,7 +65,7 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 
 	case backupModeSqlite:
 		b, err := newBackuperSqlite(ctx, cmd.String("backup.sqlite_file"),
-			cmd.String("backup.policy"))
+			cmd.String("backup.policy"), cmd.Bool("backup.compress"))
 		if err != nil {
 			return backuper, fmt.Errorf("create sqlite backup failed: %w", err)
 		}

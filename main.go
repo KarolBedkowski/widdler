@@ -137,7 +137,7 @@ func main() { //nolint:funlen
 						Value: "backups",
 						Usage: "Directory for backups in user directory.",
 					},
-					&cli.BoolFlag{Name: "backup.compress", Value: false, Usage: "GZIP backup files."},
+					&cli.BoolFlag{Name: "backup.compress", Value: false, Usage: "compress backup with GZIP."},
 					&cli.StringFlag{
 						Name:  "backup.policy",
 						Value: "7,7",

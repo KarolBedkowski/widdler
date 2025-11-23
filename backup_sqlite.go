@@ -33,11 +33,12 @@ type BackuperSqlite struct {
 	db       *sql.DB
 	keepFull int
 	keepIncr int
+	compress bool
 }
 
-var _ BackupHandler = &BackuperSqlite{nil, 0, 0}
+var _ BackupHandler = &BackuperSqlite{nil, 0, 0, false}
 
-func newBackuperSqlite(ctx context.Context, dbfilename, policy string) (BackuperSqlite, error) {
+func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress bool) (BackuperSqlite, error) {
 	conn, err := sql.Open("sqlite", dbfilename)
 	if err != nil {
 		return BackuperSqlite{}, fmt.Errorf("open database file failed: %w", err)
@@ -56,6 +57,7 @@ func newBackuperSqlite(ctx context.Context, dbfilename, policy string) (Backuper
 		db:       conn,
 		keepFull: 0,
 		keepIncr: 0,
+		compress: compress,
 	}
 	if policy != "" {
 		if err := b.loadPolicy(policy); err != nil {
@@ -262,11 +264,16 @@ func (b *BackuperSqlite) storeContent(
 ) error {
 	compressed := 0
 	storefull := 0
-
-	dbparentid := sql.NullInt64{Int64: parentID, Valid: true}
+	parentBackup := sql.NullInt64{Int64: parentID, Valid: true}
 
 	if isfull {
-		// compressed only full content
+		storefull = 1
+		parentBackup.Valid = false
+		parentBackup.Int64 = 0
+	}
+
+	// compressed only full content and bigger incrementals
+	if b.compress && (isfull || len(content) > 1024) {
 		var err error
 
 		content, err = b.compressContent(content)
@@ -275,15 +282,15 @@ func (b *BackuperSqlite) storeContent(
 		}
 
 		compressed = 1
-		storefull = 1
-		dbparentid.Valid = false
-		dbparentid.Int64 = 0
 	}
+
+	slog.DebugContext(ctx, "insert backup", "user", username, "file", file, "isfull", isfull,
+		"compressed", compressed, "parent", parentID, "len", len(content))
 
 	_, err := b.db.ExecContext(ctx, `
 			INSERT INTO backups (username, filename, ts, isfull, content, compressed, parent)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		username, file, time.Now().Unix(), storefull, content, compressed, dbparentid)
+		username, file, time.Now().Unix(), storefull, content, compressed, parentBackup)
 	if err != nil {
 		return fmt.Errorf("insert new content failed: %w", err)
 	}
@@ -383,7 +390,11 @@ func ListSqliteBackups(ctx context.Context, dbfilename, username string) ([]Sqli
 	return backups, nil
 }
 
-func RestoreSqliteBackup(ctx context.Context, dbfilename string, backupid int64) ([]byte, error) { //nolint:cyclop
+func RestoreSqliteBackup( //nolint:cyclop,funlen
+	ctx context.Context,
+	dbfilename string,
+	backupid int64,
+) ([]byte, error) {
 	conn, err := sql.Open("sqlite", dbfilename)
 	if err != nil {
 		return nil, fmt.Errorf("open database file failed: %w", err)
@@ -395,10 +406,11 @@ func RestoreSqliteBackup(ctx context.Context, dbfilename string, backupid int64)
 		content, parentContent []byte
 		compressed, isfull, ts int
 		parentCompressed       sql.NullInt32
+		parentID               sql.NullInt64
 	)
 
 	err = conn.QueryRowContext(ctx, `
-			SELECT b.compressed, b.content, b.isfull, b.ts, pb.compressed, pb.content
+			SELECT b.compressed, b.content, b.isfull, b.ts, pb.compressed, pb.content, b.parent
 			FROM backups b LEFT JOIN backups pb ON b.parent = pb.id
 			WHERE b.id=?`,
 		backupid).
@@ -410,7 +422,18 @@ func RestoreSqliteBackup(ctx context.Context, dbfilename string, backupid int64)
 	}
 
 	if compressed == 1 {
-		return decompressContent(content)
+		content, err = decompressContent(content)
+		if err != nil {
+			return nil, fmt.Errorf("decompress content failed: %w", err)
+		}
+	}
+
+	if isfull == 1 {
+		return content, nil
+	}
+
+	if len(parentContent) == 0 || !parentID.Valid {
+		return nil, fmt.Errorf("parent full backup (%d) not found", parentID.Int64) //nolint:err113
 	}
 
 	if parentCompressed.Valid && parentCompressed.Int32 == 1 {

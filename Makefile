@@ -32,7 +32,8 @@ run:
 		--wikis "`pwd`/wikis/" \
 		--backup.mode sqlite \
 		--backup.interval 5 \
-		--backup.policy 2,5 
+		--backup.policy 2,5 \
+		--backup.compress
 
 #-backup.mode git \
 #--auth basic \
