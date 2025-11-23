@@ -39,12 +39,16 @@ type BackuperSqlite struct {
 var _ BackupHandler = &BackuperSqlite{nil, 0, 0, false}
 
 func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress bool) (BackuperSqlite, error) {
-	conn, err := sql.Open("sqlite", dbfilename)
+	db, err := sql.Open("sqlite", dbfilename)
 	if err != nil {
 		return BackuperSqlite{}, fmt.Errorf("open database file failed: %w", err)
 	}
 
-	_, err = conn.ExecContext(ctx, `
+	db.SetConnMaxLifetime(60) //nolint:mnd
+	db.SetMaxIdleConns(1)
+	db.SetMaxOpenConns(5) //nolint:mnd
+
+	_, err = db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS backups (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT,
 			filename TEXT, ts DATETIME, isfull INTEGER, compressed INTEGER, parent INTEGER,
 			content BLOB);
@@ -53,23 +57,30 @@ func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress 
 		return BackuperSqlite{}, fmt.Errorf("init database failed: %w", err)
 	}
 
-	b := BackuperSqlite{
-		db:       conn,
-		keepFull: 0,
-		keepIncr: 0,
-		compress: compress,
+	backuper := BackuperSqlite{
+		db:        db,
+		keepFull:  0,
+		keepIncr:  0,
+		compress:  compress,
 	}
 	if policy != "" {
-		if err := b.loadPolicy(policy); err != nil {
+		if err := backuper.loadPolicy(policy); err != nil {
 			return BackuperSqlite{}, err
 		}
 	}
 
-	return b, nil
+	return backuper, nil
 }
 
 func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, file string) error {
-	lastFullContent, parentID, err := b.getPrevContent(ctx, username, file)
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin db transaction failed: %w", err)
+	}
+
+	defer tx.Rollback() //nolint:errcheck
+
+	lastFullContent, parentID, err := b.getPrevContent(ctx, tx, username, file)
 	if err != nil {
 		return fmt.Errorf("read prev backup failed: %w", err)
 	}
@@ -84,7 +95,7 @@ func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, fi
 	isfull := len(lastFullContent) == 0
 	if !isfull {
 		dmp := diffmatchpatch.New()
-		diffs := dmp.DiffMain(lastFullContent, string(newContentB), true)
+		diffs := dmp.DiffMain(lastFullContent, string(newContentB), false)
 		patch := dmp.PatchMake(diffs)
 		newContentB = []byte(dmp.PatchToText(patch))
 	}
@@ -95,8 +106,12 @@ func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, fi
 		return nil
 	}
 
-	if err := b.storeContent(ctx, username, file, isfull, newContentB, parentID); err != nil {
+	if err := b.storeContent(ctx, tx, username, file, isfull, newContentB, parentID); err != nil {
 		return fmt.Errorf("store new backup failed: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit changes to db failed: %w", err)
 	}
 
 	slog.DebugContext(ctx, "backup created", "full", isfull, "len", len(newContentB))
@@ -104,10 +119,17 @@ func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, fi
 	return nil
 }
 
-func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error {
+func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //nolint:cyclop
 	if b.keepIncr == 0 && b.keepFull == 0 {
 		return nil
 	}
+
+	conn, err := b.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to open db connection: %w", err)
+	}
+
+	defer conn.Close()
 
 	for _, user := range users {
 		tx, err := b.db.BeginTx(ctx, nil)
@@ -134,6 +156,10 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error {
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit db transaction failed: %w", err)
 		}
+	}
+
+	if _, err := b.db.ExecContext(ctx, "VACUUM"); err != nil {
+		return fmt.Errorf("run vacuum failed: %w", err)
 	}
 
 	return nil
@@ -207,13 +233,22 @@ func (b *BackuperSqlite) loadPolicy(policy string) error {
 
 	var err error
 
-	b.keepFull, err = strconv.Atoi(fields[0])
-	if err != nil {
-		return fmt.Errorf("invalid policy value %q: %w", fields[0], err)
+	if fields[0] != "" {
+		b.keepFull, err = strconv.Atoi(fields[0])
+		if err != nil {
+			return fmt.Errorf("invalid policy value %q: %w", fields[0], err)
+		}
 	}
 
-	if len(fields) > 1 {
+	if len(fields) > 1 && fields[1] != "" {
 		b.keepIncr, err = strconv.Atoi(fields[1])
+		if err != nil {
+			return fmt.Errorf("invalid policy value %q: %w", fields[1], err)
+		}
+	}
+
+	if len(fields) > 2 && fields[2] != "" {
+		b.fullEvery, err = time.ParseDuration(fields[2])
 		if err != nil {
 			return fmt.Errorf("invalid policy value %q: %w", fields[1], err)
 		}
@@ -222,7 +257,7 @@ func (b *BackuperSqlite) loadPolicy(policy string) error {
 	return nil
 }
 
-func (b *BackuperSqlite) getPrevContent(ctx context.Context, username, file string) (string, int64, error) {
+func (b *BackuperSqlite) getPrevContent(ctx context.Context, tx *sql.Tx, username, file string) (string, int64, error) {
 	var (
 		content    []byte
 		compressed int
@@ -230,7 +265,7 @@ func (b *BackuperSqlite) getPrevContent(ctx context.Context, username, file stri
 	)
 
 	maxFullTs := time.Now().Add(-createNextFullInterval)
-	err := b.db.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 			SELECT id, compressed, content FROM backups
 			WHERE username=? AND filename=? AND isfull=1 AND ts > ?
 			ORDER BY ts DESC LIMIT 1`,
@@ -257,6 +292,7 @@ func (b *BackuperSqlite) getPrevContent(ctx context.Context, username, file stri
 
 func (b *BackuperSqlite) storeContent(
 	ctx context.Context,
+	tx *sql.Tx,
 	username, file string,
 	isfull bool,
 	content []byte,
@@ -287,7 +323,7 @@ func (b *BackuperSqlite) storeContent(
 	slog.DebugContext(ctx, "insert backup", "user", username, "file", file, "isfull", isfull,
 		"compressed", compressed, "parent", parentID, "len", len(content))
 
-	_, err := b.db.ExecContext(ctx, `
+	_, err := tx.ExecContext(ctx, `
 			INSERT INTO backups (username, filename, ts, isfull, content, compressed, parent)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		username, file, time.Now().Unix(), storefull, content, compressed, parentBackup)
