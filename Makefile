@@ -21,15 +21,26 @@ lint:
 .PHONY: format
 format:
 	# find internal cli -type d -exec wsl -fix prom-dbquery_exporter.app/{} ';'
-	find . -name '*.go' -type f -exec gofumpt -w {} ';'
+	# find . -name '*.go' -type f -exec gofumpt -w {} ';'
+	golangci-lint fmt
 
 .PHONY: run
 run:
-	go run . -backup.keep_daily 2 -backup.keep_on_write 5 -wikis "`pwd`/wikis/" -log.level debug -backup.interval 5 -backup.mode git-once
+	go run -tags gitint . \
+		--log.level debug \
+		serve \
+		--wikis "`pwd`/wikis/" \
+		--backup.mode sqlite \
+		--backup.interval 5 \
+		--backup.policy 2,5,30s \
+		--backup.compress
+
+#-backup.mode git \
+#--auth basic \
 
 .PHONY: run-multi
 run-multi:
-	go run . -backup.keep_daily 2 -backup.keep_on_write 5 -wikis "`pwd`/wikis/" -log.level debug -backup.interval 5 -backup.mode git-once \
+	go run . -backup.keep_daily 2 -backup.keep_on_write 5 -wikis "`pwd`/wikis/" -log.level debug -backup.interval 5 -backup.mode git \
 		-htpass `pwd`/.htpasswd -auth basic
 
 # vim:ft=make
