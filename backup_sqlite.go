@@ -30,13 +30,14 @@ const (
 )
 
 type BackuperSqlite struct {
-	db       *sql.DB
-	keepFull int
-	keepIncr int
-	compress bool
+	db               *sql.DB
+	keepFull         int
+	keepIncr         int
+	maxFullBackupAge time.Duration
+	compress         bool
 }
 
-var _ BackupHandler = &BackuperSqlite{nil, 0, 0, false}
+var _ BackupHandler = &BackuperSqlite{} //nolint:exhaustruct
 
 func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress bool) (BackuperSqlite, error) {
 	db, err := sql.Open("sqlite", dbfilename)
@@ -58,10 +59,11 @@ func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress 
 	}
 
 	backuper := BackuperSqlite{
-		db:        db,
-		keepFull:  0,
-		keepIncr:  0,
-		compress:  compress,
+		db:               db,
+		keepFull:         0,
+		keepIncr:         0,
+		maxFullBackupAge: createNextFullInterval,
+		compress:         compress,
 	}
 	if policy != "" {
 		if err := backuper.loadPolicy(policy); err != nil {
@@ -225,7 +227,7 @@ func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user
 	return nil
 }
 
-func (b *BackuperSqlite) loadPolicy(policy string) error {
+func (b *BackuperSqlite) loadPolicy(policy string) error { //nolint:cyclop
 	fields := strings.Split(policy, ",")
 	if len(fields) == 0 {
 		return nil
@@ -236,21 +238,26 @@ func (b *BackuperSqlite) loadPolicy(policy string) error {
 	if fields[0] != "" {
 		b.keepFull, err = strconv.Atoi(fields[0])
 		if err != nil {
-			return fmt.Errorf("invalid policy value %q: %w", fields[0], err)
+			return fmt.Errorf("invalid policy value for keep-full backups %q: %w", fields[0], err)
 		}
 	}
 
 	if len(fields) > 1 && fields[1] != "" {
 		b.keepIncr, err = strconv.Atoi(fields[1])
 		if err != nil {
-			return fmt.Errorf("invalid policy value %q: %w", fields[1], err)
+			return fmt.Errorf("invalid policy value for keep-incremental backups %q: %w", fields[1], err)
 		}
 	}
 
 	if len(fields) > 2 && fields[2] != "" {
-		b.fullEvery, err = time.ParseDuration(fields[2])
+		b.maxFullBackupAge, err = time.ParseDuration(fields[2])
 		if err != nil {
-			return fmt.Errorf("invalid policy value %q: %w", fields[1], err)
+			return fmt.Errorf("invalid policy value for full backup interval %q: %w", fields[1], err)
+		}
+
+		if b.maxFullBackupAge <= 0 {
+			return fmt.Errorf( //nolint:err113
+				"invalid policy value for full backup interval %q; must be greater than 0", fields[1])
 		}
 	}
 
@@ -264,7 +271,7 @@ func (b *BackuperSqlite) getPrevContent(ctx context.Context, tx *sql.Tx, usernam
 		backupid   int64
 	)
 
-	maxFullTs := time.Now().Add(-createNextFullInterval)
+	maxFullTs := time.Now().Add(-b.maxFullBackupAge)
 	err := tx.QueryRowContext(ctx, `
 			SELECT id, compressed, content FROM backups
 			WHERE username=? AND filename=? AND isfull=1 AND ts > ?

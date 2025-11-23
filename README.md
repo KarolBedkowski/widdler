@@ -96,7 +96,7 @@ widdler serve --backup=file --backup.policy=7,5 --wikis ./wiki/ --backup.interva
 
 Additional parameters:
 * `--backup.sqlite_file` - file name for sqlite database; created if not exists. One file for all user.
-* `--backup.policy` - set number of backups to keep in form `<number of full backups>,<number of incremental backups>`.
+* `--backup.policy` - set number of backups to keep in form `<number of full backups>,<number of incremental backups>,<interval between full backups>`. Every part can be empty. Interval must be defined as "300s", "2h", "2h45m" etc; default - 8h.
 * `--backup.compress` - compress full and big incremental backups.
 
 Incremental backups store only changes from last "full" backup, so safe a lot of space. Full backups are compressed.

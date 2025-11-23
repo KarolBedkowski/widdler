@@ -32,7 +32,7 @@ run:
 		--wikis "`pwd`/wikis/" \
 		--backup.mode sqlite \
 		--backup.interval 5 \
-		--backup.policy 2,5 \
+		--backup.policy 2,5,30s \
 		--backup.compress
 
 #-backup.mode git \
