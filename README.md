@@ -34,7 +34,7 @@ Run `widdler -h` to see all options.
 ## Single user mode
 ```
 mkdir wiki
-widdler
+widdler serve
 ```
 
 ## Multiuser mode
@@ -43,11 +43,11 @@ widdler
 mkdir wiki
 cd wiki
 # Generate a .htpasswd file:
-widdler -gen
+widdler gen-htpass
 Username: qbit
 Passwd: ******
 # Start the server
-widdler -auth=basic
+widdler serve --auth=basic
 ```
 
 Now open your browser to [http://localhost:8080](http://localhost:8080).
@@ -67,30 +67,52 @@ Simply hit the save button!
 
 Widdler can backup current file before write changes.
 
-Widdler support two main modes for backup (selected by `-backup.mode` argument):
-- copy files into backup directory ("file" mode)
-- put file into git repository ("git", "git-once" modes)
+Widdler support two main modes for backup (selected by `--backup.mode` argument):
+- copy files into backup directory (`file` mode)
+- put file into git repository (`git`, `git-once` modes)
+- keep backups (full and incremental) in sqlite database (`sqlite` mode)
 
-`-backup.interval` argument set minimal time (in seconds) between write changes of each file.
+`--backup.interval` argument set minimal time (in seconds) between write changes of each file.
 
 ## "File" mode
 
-"file" mode use additional parameters:
+Additional parameters:
 
-* `-backup.dir` - directory for backup files (directory in user home in multi-user mode)
-* `-backup.compress` - enable file compression
-* `-backup.keep_daily` - limit number of backup files to keep; one file per day
-* `-backup.keep_on_write` - limit number of backup files created today
+* `--backup.dir` - directory for backup files (directory in user home in multi-user mode)
+* `--backup.compress` - enable file compression
+* `--backup.policy` - set number of backups to keep in form of `<number of daily backups>,<number of regular backups>`
 
-Set `keep_daily` or `keep_on_write` if no `mode` is given enable "file" mode.
+In multi-user mode each user have own "backup" directory in home.
 
 Old backup files are deleted in background.
 
-Example:
+### Example
 
 ```
-widdler -backup.keep_daily 7 -backup.keep_on_write 5 -wikis ./wiki/ -backup.interval 5
+widdler serve --backup=file --backup.policy=7,5 --wikis ./wiki/ --backup.interval 5
 ```
+
+## "Sqlite" mode
+
+Additional parameters:
+* `--backup.sqlite_file` - file name for sqlite database; created if not exists. One file for all user.
+* `--backup.policy` - set number of backups to keep in form `<number of full backups>,<number of incremental backups>`
+
+Incremental backups store only changes from last "full" backup, so safe a lot of space. Full backups are compressed.
+
+For manage backups in sqlite database Widdler provide two commands:
+* `list-backups` - list backups for one or all users
+* `restore-backup` - restore one backup and print it on stdout.
+
+
+Old backup files are deleted in background.
+
+### Example
+
+```
+widdler serve --backup=sqlite --backup.policy=7,5 --wikis=./wiki/ --backup.interval=5 --backup.sqlite_file=backup.sqlite
+```
+
 
 ## "Git*" modes
 
@@ -103,6 +125,6 @@ widdler -backup.keep_daily 7 -backup.keep_on_write 5 -wikis ./wiki/ -backup.inte
 Example:
 
 ```
-widdler -wikis ./wiki/ -backup.mode git-once
-widdler -wikis ./wiki/ -backup.interval 10 -backup.mode git
+widdler serve --wikis=./wiki/ --backup.mode=git-once
+widdler serve --wikis=./wiki/ --backup.interval=10 --backup.mode=git
 ```
