@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,6 +33,24 @@ type BackuperFile struct {
 }
 
 var _ BackupHandler = &BackuperFile{} //nolint:exhaustruct
+
+func newBackuperFile(basedir, backupdir, policy string, compress bool) (BackuperFile, error) {
+	backuper := BackuperFile{
+		baseDir:     basedir,
+		backupDir:   backupdir,
+		compress:    compress,
+		keepOnWrite: 0,
+		keepDaily:   0,
+	}
+
+	if policy != "" {
+		if err := backuper.loadPolicy(policy); err != nil {
+			return backuper, err
+		}
+	}
+
+	return backuper, nil
+}
 
 func (b *BackuperFile) Create(ctx context.Context, root *os.Root, user, srcFilePath string) error {
 	_ = user
@@ -134,6 +153,29 @@ func (b *BackuperFile) deleteOldBackups(directory string) error {
 			if err := os.Remove(fname); err != nil {
 				return fmt.Errorf("remove %q error: %w", fname, err)
 			}
+		}
+	}
+
+	return nil
+}
+
+func (b *BackuperFile) loadPolicy(policy string) error {
+	fields := strings.Split(policy, ",")
+	if len(fields) == 0 {
+		return nil
+	}
+
+	var err error
+
+	b.keepDaily, err = strconv.Atoi(fields[0])
+	if err != nil {
+		return fmt.Errorf("invalid policy value %q: %w", fields[0], err)
+	}
+
+	if len(fields) > 1 {
+		b.keepOnWrite, err = strconv.Atoi(fields[1])
+		if err != nil {
+			return fmt.Errorf("invalid policy value %q: %w", fields[1], err)
 		}
 	}
 

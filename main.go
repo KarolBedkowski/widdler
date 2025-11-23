@@ -138,15 +138,10 @@ func main() { //nolint:funlen
 						Usage: "Directory for backups in user directory.",
 					},
 					&cli.BoolFlag{Name: "backup.compress", Value: false, Usage: "GZIP backup files."},
-					&cli.IntFlag{
-						Name:  "backup.keep_daily",
-						Value: 7, //nolint:mnd
-						Usage: "If > 0 keep given number of daily backups.",
-					},
-					&cli.IntFlag{
-						Name:  "backup.keep_on_write",
-						Value: 7, //nolint:mnd
-						Usage: "If > 0 keep given number of backup created on write.",
+					&cli.StringFlag{
+						Name:  "backup.policy",
+						Value: "7,7",
+						Usage: "Define backup policy.",
 					},
 					&cli.IntFlag{
 						Name:  "backup.interval",

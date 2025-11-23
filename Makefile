@@ -32,9 +32,10 @@ run:
 		--wikis "`pwd`/wikis/" \
 		--backup.mode sqlite \
 		--backup.interval 5 \
-		--backup.keep_daily 2 -backup.keep_on_write 5 
+		--backup.policy 2,5 
 
 #-backup.mode git \
+#--auth basic \
 
 .PHONY: run-multi
 run-multi:

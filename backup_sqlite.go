@@ -16,6 +16,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -28,12 +30,14 @@ const (
 )
 
 type BackuperSqlite struct {
-	db *sql.DB
+	db       *sql.DB
+	keepFull int
+	keepIncr int
 }
 
-var _ BackupHandler = &BackuperSqlite{nil}
+var _ BackupHandler = &BackuperSqlite{nil, 0, 0}
 
-func newBackuperSqlite(ctx context.Context, dbfilename string) (BackuperSqlite, error) {
+func newBackuperSqlite(ctx context.Context, dbfilename, policy string) (BackuperSqlite, error) {
 	conn, err := sql.Open("sqlite", dbfilename)
 	if err != nil {
 		return BackuperSqlite{}, fmt.Errorf("open database file failed: %w", err)
@@ -48,10 +52,21 @@ func newBackuperSqlite(ctx context.Context, dbfilename string) (BackuperSqlite, 
 		return BackuperSqlite{}, fmt.Errorf("init database failed: %w", err)
 	}
 
-	return BackuperSqlite{conn}, nil
+	b := BackuperSqlite{
+		db:       conn,
+		keepFull: 0,
+		keepIncr: 0,
+	}
+	if policy != "" {
+		if err := b.loadPolicy(policy); err != nil {
+			return BackuperSqlite{}, err
+		}
+	}
+
+	return b, nil
 }
 
-func (b BackuperSqlite) Create(ctx context.Context, root *os.Root, username, file string) error {
+func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, file string) error {
 	lastFullContent, parentID, err := b.getPrevContent(ctx, username, file)
 	if err != nil {
 		return fmt.Errorf("read prev backup failed: %w", err)
@@ -87,11 +102,125 @@ func (b BackuperSqlite) Create(ctx context.Context, root *os.Root, username, fil
 	return nil
 }
 
-func (b BackuperSqlite) Clean(ctx context.Context, users []string) error { //nolint:revive
+func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error {
+	if b.keepIncr == 0 && b.keepFull == 0 {
+		return nil
+	}
+
+	for _, user := range users {
+		tx, err := b.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin db transaction failed: %w", err)
+		}
+
+		if b.keepIncr > 0 {
+			if err := b.deleteIncrBackups(ctx, tx, user); err != nil {
+				_ = tx.Rollback()
+
+				return err
+			}
+		}
+
+		if b.keepFull > 0 {
+			if err := b.deleteFullBackups(ctx, tx, user); err != nil {
+				_ = tx.Rollback()
+
+				return err
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit db transaction failed: %w", err)
+		}
+	}
+
 	return nil
 }
 
-func (b BackuperSqlite) getPrevContent(ctx context.Context, username, file string) (string, int64, error) {
+func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user string) error {
+	var backupid sql.NullInt64
+
+	err := tx.QueryRowContext(ctx, "SELECT min(id) FROM ( "+
+		"SELECT id FROM backups WHERE username=? AND isfull=0 ORDER BY ts desc LIMIT "+strconv.Itoa(b.keepIncr)+
+		")", user).Scan(&backupid)
+	if errors.Is(err, sql.ErrNoRows) {
+		slog.DebugContext(ctx, "delete incr backups - not found", "user", user)
+
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("clean incr backup for user %q failed: %w", user, err)
+	}
+
+	slog.DebugContext(ctx, "delete incr backups; min id: "+strconv.Itoa(int(backupid.Int64)), "user", user)
+
+	res, err := tx.ExecContext(ctx, "DELETE FROM backups WHERE username=? AND isfull=0 and id < ?",
+		user, backupid)
+	if err != nil {
+		return fmt.Errorf("clean incr backup for user %q failed: %w", user, err)
+	}
+
+	count, _ := res.RowsAffected()
+	slog.DebugContext(ctx, "delete incr backups; deleted: "+strconv.Itoa(int(count)), "user", user)
+
+	return nil
+}
+
+func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user string) error {
+	var backupid sql.NullInt64
+
+	err := tx.QueryRowContext(ctx, "SELECT min(id) FROM ( "+
+		"SELECT id FROM backups b WHERE username=? AND isfull=1 "+
+		" AND NOT EXISTS (SELECT NULL FROM backups b2 WHERE b2.parent = b.id) "+
+		"ORDER BY ts desc LIMIT "+strconv.Itoa(b.keepIncr)+
+		")", user).Scan(&backupid)
+	if errors.Is(err, sql.ErrNoRows) {
+		slog.DebugContext(ctx, "delete full backups - not found", "user", user)
+
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("clean full backup for user %q failed: %w", user, err)
+	}
+
+	slog.DebugContext(ctx, "delete full backups; min id: "+strconv.Itoa(int(backupid.Int64)), "user", user)
+
+	res, err := tx.ExecContext(ctx,
+		"DELETE FROM backups as b WHERE username=? AND isfull=1 and id < ? "+
+			" AND NOT EXISTS (SELECT NULL FROM backups b2 WHERE b2.parent = b.id) ",
+		user, backupid)
+	if err != nil {
+		return fmt.Errorf("clean full backup for user %q failed: %w", user, err)
+	}
+
+	count, _ := res.RowsAffected()
+	slog.DebugContext(ctx, "delete full backups; deleted: "+strconv.Itoa(int(count)), "user", user)
+
+	return nil
+}
+
+func (b *BackuperSqlite) loadPolicy(policy string) error {
+	fields := strings.Split(policy, ",")
+	if len(fields) == 0 {
+		return nil
+	}
+
+	var err error
+
+	b.keepFull, err = strconv.Atoi(fields[0])
+	if err != nil {
+		return fmt.Errorf("invalid policy value %q: %w", fields[0], err)
+	}
+
+	if len(fields) > 1 {
+		b.keepIncr, err = strconv.Atoi(fields[1])
+		if err != nil {
+			return fmt.Errorf("invalid policy value %q: %w", fields[1], err)
+		}
+	}
+
+	return nil
+}
+
+func (b *BackuperSqlite) getPrevContent(ctx context.Context, username, file string) (string, int64, error) {
 	var (
 		content    []byte
 		compressed int
@@ -124,7 +253,7 @@ func (b BackuperSqlite) getPrevContent(ctx context.Context, username, file strin
 	return string(content), backupid, nil
 }
 
-func (b BackuperSqlite) storeContent(
+func (b *BackuperSqlite) storeContent(
 	ctx context.Context,
 	username, file string,
 	isfull bool,
@@ -162,7 +291,7 @@ func (b BackuperSqlite) storeContent(
 	return nil
 }
 
-func (BackuperSqlite) compressContent(content []byte) ([]byte, error) {
+func (*BackuperSqlite) compressContent(content []byte) ([]byte, error) {
 	var buf bytes.Buffer
 
 	zw := gzip.NewWriter(&buf)

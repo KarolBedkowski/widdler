@@ -55,21 +55,22 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 
 	switch backuper.mode {
 	case backupModeFile:
-		backuper.handler = &BackuperFile{
-			baseDir:     davDir,
-			backupDir:   backupDir,
-			compress:    cmd.Bool("backup.compress"),
-			keepOnWrite: cmd.Int("backup.keep_on_write"),
-			keepDaily:   cmd.Int("backup.keep_daily"),
+		b, err := newBackuperFile(davDir, backupDir, cmd.String("backup.policy"),
+			cmd.Bool("backup.compress"))
+		if err != nil {
+			return backuper, fmt.Errorf("prepare backuper failed: %w", err)
 		}
 
-	case backupModeSqlite:
-		var err error
+		backuper.handler = &b
 
-		backuper.handler, err = newBackuperSqlite(ctx, cmd.String("backup.sqlite_file"))
+	case backupModeSqlite:
+		b, err := newBackuperSqlite(ctx, cmd.String("backup.sqlite_file"),
+			cmd.String("backup.policy"))
 		if err != nil {
 			return backuper, fmt.Errorf("create sqlite backup failed: %w", err)
 		}
+
+		backuper.handler = &b
 
 	case backupModeGIT, backupModeGITOnce:
 		backuper.handler = &BackuperGit{}
@@ -150,6 +151,10 @@ func (b *Backuper) cleanWorker(ctx context.Context, users []string) {
 	slog.DebugContext(ctx, "clean old backups worker started", "users", users)
 
 	c := time.Tick(cleanTaskInterval * time.Second)
+
+	if len(users) == 0 {
+		users = []string{""}
+	}
 
 	for {
 		if err := b.handler.Clean(ctx, users); err != nil {
