@@ -31,8 +31,8 @@ const (
 
 type BackuperSqlite struct {
 	db               *sql.DB
-	keepFull         int
-	keepIncr         int
+	numFullBackups   int
+	numIncrBackups   int
 	maxFullBackupAge time.Duration
 	compress         bool
 }
@@ -60,8 +60,8 @@ func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress 
 
 	backuper := BackuperSqlite{
 		db:               db,
-		keepFull:         0,
-		keepIncr:         0,
+		numFullBackups:   7, //nolint:mnd
+		numIncrBackups:   7, //nolint:mnd
 		maxFullBackupAge: createNextFullInterval,
 		compress:         compress,
 	}
@@ -82,12 +82,19 @@ func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, fi
 
 	defer tx.Rollback() //nolint:errcheck
 
-	lastFullContent, parentID, err := b.getPrevContent(ctx, tx, username, file)
-	if err != nil {
-		return fmt.Errorf("read prev backup failed: %w", err)
-	}
+	var (
+		lastFullContent string
+		parentID        int64
+	)
 
-	slog.DebugContext(ctx, "prev content", "len", len(lastFullContent))
+	if b.numIncrBackups > 0 {
+		lastFullContent, parentID, err = b.getPrevContent(ctx, tx, username, file)
+		if err != nil {
+			return fmt.Errorf("read prev backup failed: %w", err)
+		}
+
+		slog.DebugContext(ctx, "prev content", "len", len(lastFullContent))
+	}
 
 	newContentB, err := root.ReadFile(file)
 	if err != nil {
@@ -122,7 +129,7 @@ func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, fi
 }
 
 func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //nolint:cyclop
-	if b.keepIncr == 0 && b.keepFull == 0 {
+	if b.numIncrBackups == 0 && b.numFullBackups == 0 {
 		return nil
 	}
 
@@ -139,7 +146,7 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 			return fmt.Errorf("begin db transaction failed: %w", err)
 		}
 
-		if b.keepIncr > 0 {
+		if b.numIncrBackups > 0 {
 			if err := b.deleteIncrBackups(ctx, tx, user); err != nil {
 				_ = tx.Rollback()
 
@@ -147,7 +154,7 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 			}
 		}
 
-		if b.keepFull > 0 {
+		if b.numFullBackups > 0 {
 			if err := b.deleteFullBackups(ctx, tx, user); err != nil {
 				_ = tx.Rollback()
 
@@ -171,7 +178,7 @@ func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user
 	var backupid sql.NullInt64
 
 	err := tx.QueryRowContext(ctx, "SELECT min(id) FROM ( "+
-		"SELECT id FROM backups WHERE username=? AND isfull=0 ORDER BY ts desc LIMIT "+strconv.Itoa(b.keepIncr)+
+		"SELECT id FROM backups WHERE username=? AND isfull=0 ORDER BY ts desc LIMIT "+strconv.Itoa(b.numIncrBackups)+
 		")", user).Scan(&backupid)
 	if errors.Is(err, sql.ErrNoRows) {
 		slog.DebugContext(ctx, "delete incr backups - not found", "user", user)
@@ -181,7 +188,7 @@ func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user
 		return fmt.Errorf("clean incr backup for user %q failed: %w", user, err)
 	}
 
-	slog.DebugContext(ctx, "delete incr backups; min id: "+strconv.Itoa(int(backupid.Int64)), "user", user)
+	slog.DebugContext(ctx, "delete incr backups", "min_id", backupid.Int64, "user", user)
 
 	res, err := tx.ExecContext(ctx, "DELETE FROM backups WHERE username=? AND isfull=0 and id < ?",
 		user, backupid)
@@ -190,7 +197,7 @@ func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user
 	}
 
 	count, _ := res.RowsAffected()
-	slog.DebugContext(ctx, "delete incr backups; deleted: "+strconv.Itoa(int(count)), "user", user)
+	slog.DebugContext(ctx, "delete incr backups", "deleted", count, "user", user)
 
 	return nil
 }
@@ -201,7 +208,7 @@ func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user
 	err := tx.QueryRowContext(ctx, "SELECT min(id) FROM ( "+
 		"SELECT id FROM backups b WHERE username=? AND isfull=1 "+
 		" AND NOT EXISTS (SELECT NULL FROM backups b2 WHERE b2.parent = b.id) "+
-		"ORDER BY ts desc LIMIT "+strconv.Itoa(b.keepIncr)+
+		"ORDER BY ts desc LIMIT "+strconv.Itoa(b.numIncrBackups)+
 		")", user).Scan(&backupid)
 	if errors.Is(err, sql.ErrNoRows) {
 		slog.DebugContext(ctx, "delete full backups - not found", "user", user)
@@ -211,7 +218,7 @@ func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user
 		return fmt.Errorf("clean full backup for user %q failed: %w", user, err)
 	}
 
-	slog.DebugContext(ctx, "delete full backups; min id: "+strconv.Itoa(int(backupid.Int64)), "user", user)
+	slog.DebugContext(ctx, "delete full backups", "min_id", backupid.Int64, "user", user)
 
 	res, err := tx.ExecContext(ctx,
 		"DELETE FROM backups as b WHERE username=? AND isfull=1 and id < ? "+
@@ -222,11 +229,16 @@ func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user
 	}
 
 	count, _ := res.RowsAffected()
-	slog.DebugContext(ctx, "delete full backups; deleted: "+strconv.Itoa(int(count)), "user", user)
+	slog.DebugContext(ctx, "delete full backups", "deleted", count, "user", user)
 
 	return nil
 }
 
+// loadPolicy parse and set backup policy.
+// Format: up to 3 fields separated by ',':
+// 1. number of full backups to keep; must be > 0; default 7.
+// 2. number of incremental backups to keep (optional). Missing or 0 disable incremental backups. Default 7.
+// 3. time between create full backup (optional). Default createNextFullInterval.
 func (b *BackuperSqlite) loadPolicy(policy string) error { //nolint:cyclop
 	fields := strings.Split(policy, ",")
 	if len(fields) == 0 {
@@ -236,30 +248,42 @@ func (b *BackuperSqlite) loadPolicy(policy string) error { //nolint:cyclop
 	var err error
 
 	if fields[0] != "" {
-		b.keepFull, err = strconv.Atoi(fields[0])
+		b.numFullBackups, err = strconv.Atoi(fields[0])
 		if err != nil {
-			return fmt.Errorf("invalid policy value for keep-full backups %q: %w", fields[0], err)
+			return fmt.Errorf("invalid policy value for number of full backups %q: %w", fields[0], err)
+		}
+
+		if b.numFullBackups <= 0 {
+			return fmt.Errorf("invalid policy value for number of full backups %q - must be greater than 0", fields[0])
 		}
 	}
 
 	if len(fields) > 1 && fields[1] != "" {
-		b.keepIncr, err = strconv.Atoi(fields[1])
+		b.numIncrBackups, err = strconv.Atoi(fields[1])
 		if err != nil {
-			return fmt.Errorf("invalid policy value for keep-incremental backups %q: %w", fields[1], err)
+			return fmt.Errorf("invalid policy value for number of incremental backups %q: %w", fields[1], err)
+		}
+
+		if b.numIncrBackups < 0 {
+			return fmt.Errorf("invalid policy value for number of incremental backups %q - must be greater or equal 0",
+				fields[1])
 		}
 	}
 
 	if len(fields) > 2 && fields[2] != "" {
 		b.maxFullBackupAge, err = time.ParseDuration(fields[2])
 		if err != nil {
-			return fmt.Errorf("invalid policy value for full backup interval %q: %w", fields[1], err)
+			return fmt.Errorf("invalid policy value for full backup interval %q: %w", fields[2], err)
 		}
 
-		if b.maxFullBackupAge <= 0 {
+		if b.maxFullBackupAge < 0 {
 			return fmt.Errorf( //nolint:err113
-				"invalid policy value for full backup interval %q; must be greater than 0", fields[1])
+				"invalid policy value for full backup interval %q; must be greater than 0", fields[2])
 		}
 	}
+
+	slog.Info(fmt.Sprintf("backup policy: %d full backups, %d incremental backups, %s between full backups",
+		b.numFullBackups, b.numIncrBackups, b.maxFullBackupAge))
 
 	return nil
 }
@@ -347,11 +371,11 @@ func (*BackuperSqlite) compressContent(content []byte) ([]byte, error) {
 	zw := gzip.NewWriter(&buf)
 
 	_, err := zw.Write(content)
+	zw.Close()
+
 	if err != nil {
 		return nil, fmt.Errorf("compress content error: %w", err)
 	}
-
-	zw.Close()
 
 	return buf.Bytes(), nil
 }
@@ -363,11 +387,11 @@ func decompressContent(content []byte) ([]byte, error) {
 	var bufout bytes.Buffer
 
 	_, err := io.CopyN(&bufout, zr, maxFileSize)
+	zr.Close()
+
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("compress content failed: %w", err)
 	}
-
-	zr.Close()
 
 	return bufout.Bytes(), nil
 }
@@ -381,7 +405,11 @@ type SqliteBackup struct {
 }
 
 func (s SqliteBackup) ToString() string {
-	return fmt.Sprintf("%d: %s %s %s (full=%v)", s.ID, s.Username, s.Timestamp, s.Filename, s.IsFull)
+	if s.IsFull {
+		return fmt.Sprintf("%d: %s %s %s (FULL)", s.ID, s.Username, s.Timestamp, s.Filename)
+	}
+
+	return fmt.Sprintf("%d: %s %s %s (incr)", s.ID, s.Username, s.Timestamp, s.Filename)
 }
 
 func ListSqliteBackups(ctx context.Context, dbfilename, username string) ([]SqliteBackup, error) {
