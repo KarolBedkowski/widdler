@@ -128,7 +128,7 @@ func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, fi
 	return nil
 }
 
-func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //nolint:cyclop
+func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //nolint:cyclop,revive
 	if b.numIncrBackups == 0 && b.numFullBackups == 0 {
 		return nil
 	}
@@ -140,14 +140,19 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 
 	defer conn.Close()
 
-	for _, user := range users {
+	usersfiles, err := b.getUsersFiles(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get users files: %w", err)
+	}
+
+	for _, userfile := range usersfiles {
 		tx, err := b.db.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin db transaction failed: %w", err)
 		}
 
 		if b.numIncrBackups > 0 {
-			if err := b.deleteIncrBackups(ctx, tx, user); err != nil {
+			if err := b.deleteIncrBackups(ctx, tx, userfile.Username, userfile.Filename); err != nil {
 				_ = tx.Rollback()
 
 				return err
@@ -155,7 +160,7 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 		}
 
 		if b.numFullBackups > 0 {
-			if err := b.deleteFullBackups(ctx, tx, user); err != nil {
+			if err := b.deleteFullBackups(ctx, tx, userfile.Username, userfile.Filename); err != nil {
 				_ = tx.Rollback()
 
 				return err
@@ -174,69 +179,102 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 	return nil
 }
 
-func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user string) error {
+type UserFile struct {
+	Username string
+	Filename string
+}
+
+func (b *BackuperSqlite) getUsersFiles(ctx context.Context) ([]UserFile, error) {
+	var usersfiles []UserFile
+
+	rows, err := b.db.QueryContext(ctx, "SELECT DISTINCT username, filename FROM BACKUPS")
+	if err != nil {
+		return nil, fmt.Errorf("get users files failed: %w", err)
+	}
+
+	defer rows.Close()
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get users files failed: %w", err)
+	}
+
+	for rows.Next() {
+		uf := UserFile{} //nolint:exhaustruct
+
+		if err := rows.Scan(&uf.Username, &uf.Filename); err != nil {
+			return nil, fmt.Errorf("scan user files error: %w", err)
+		}
+
+		usersfiles = append(usersfiles, uf)
+	}
+
+	return usersfiles, nil
+}
+
+func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user, file string) error {
 	var backupid sql.NullInt64
 
 	err := tx.QueryRowContext(ctx, "SELECT min(id) FROM ( "+
-		"SELECT id FROM backups WHERE username=? AND isfull=0 ORDER BY ts desc LIMIT "+strconv.Itoa(b.numIncrBackups)+
-		")", user).Scan(&backupid)
+		"SELECT id FROM backups WHERE username=? AND filename=? AND isfull=0 "+
+		"ORDER BY ts DESC LIMIT "+strconv.Itoa(b.numIncrBackups)+
+		")", user, file).Scan(&backupid)
 	if errors.Is(err, sql.ErrNoRows) {
-		slog.DebugContext(ctx, "delete incr backups - not found", "user", user)
+		slog.DebugContext(ctx, "delete incr backups - not found", "user", user, "file", file)
 
 		return nil
 	} else if err != nil {
-		return fmt.Errorf("clean incr backup for user %q failed: %w", user, err)
+		return fmt.Errorf("clean incr backup for user %q file %q failed: %w", user, file, err)
 	}
 
-	slog.DebugContext(ctx, "delete incr backups", "min_id", backupid.Int64, "user", user)
+	slog.DebugContext(ctx, "delete incr backups", "min_id", backupid.Int64, "user", user, "file", file)
 
-	res, err := tx.ExecContext(ctx, "DELETE FROM backups WHERE username=? AND isfull=0 and id < ?",
-		user, backupid)
+	res, err := tx.ExecContext(ctx, "DELETE FROM backups WHERE username=? AND filename=? AND isfull=0 and id<?",
+		user, file, backupid)
 	if err != nil {
-		return fmt.Errorf("clean incr backup for user %q failed: %w", user, err)
+		return fmt.Errorf("clean incr backup for user %q file %q failed: %w", user, file, err)
 	}
 
 	count, _ := res.RowsAffected()
-	slog.DebugContext(ctx, "delete incr backups", "deleted", count, "user", user)
+	slog.DebugContext(ctx, "delete incr backups", "deleted", count, "user", user, "file", file)
 
 	return nil
 }
 
-func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user string) error {
+func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user, file string) error {
 	var backupid sql.NullInt64
 
 	err := tx.QueryRowContext(ctx, "SELECT min(id) FROM ( "+
-		"SELECT id FROM backups b WHERE username=? AND isfull=1 "+
+		"SELECT id FROM backups b WHERE username=? AND filename=? AND isfull=1 "+
 		" AND NOT EXISTS (SELECT NULL FROM backups b2 WHERE b2.parent = b.id) "+
-		"ORDER BY ts desc LIMIT "+strconv.Itoa(b.numIncrBackups)+
-		")", user).Scan(&backupid)
+		"ORDER BY ts DESC LIMIT "+strconv.Itoa(b.numIncrBackups)+
+		")", user, file).Scan(&backupid)
 	if errors.Is(err, sql.ErrNoRows) {
-		slog.DebugContext(ctx, "delete full backups - not found", "user", user)
+		slog.DebugContext(ctx, "delete full backups - not found", "user", user, "file", file)
 
 		return nil
 	} else if err != nil {
-		return fmt.Errorf("clean full backup for user %q failed: %w", user, err)
+		return fmt.Errorf("clean full backup for user %q file %q failed: %w", user, file, err)
 	}
 
-	slog.DebugContext(ctx, "delete full backups", "min_id", backupid.Int64, "user", user)
+	slog.DebugContext(ctx, "delete full backups", "min_id", backupid.Int64, "user", user, "file", file)
 
 	res, err := tx.ExecContext(ctx,
-		"DELETE FROM backups as b WHERE username=? AND isfull=1 and id < ? "+
+		"DELETE FROM backups as b WHERE username=? AND filename=? AND isfull=1 and id < ? "+
 			" AND NOT EXISTS (SELECT NULL FROM backups b2 WHERE b2.parent = b.id) ",
-		user, backupid)
+		user, file, backupid)
 	if err != nil {
-		return fmt.Errorf("clean full backup for user %q failed: %w", user, err)
+		return fmt.Errorf("clean full backup for user %q file %q failed: %w", user, file, err)
 	}
 
 	count, _ := res.RowsAffected()
-	slog.DebugContext(ctx, "delete full backups", "deleted", count, "user", user)
+	slog.DebugContext(ctx, "delete full backups", "deleted", count, "user", user, "file", file)
 
 	return nil
 }
 
 // loadPolicy parse and set backup policy.
 // Format: up to 3 fields separated by ',':
-// 1. number of full backups to keep; must be > 0; default 7.
+// 1. number of full backups to keep; must be > 0; default 7. Also keep backup which incremental backups depend on.
 // 2. number of incremental backups to keep (optional). Missing or 0 disable incremental backups. Default 7.
 // 3. time between create full backup (optional). Default createNextFullInterval.
 func (b *BackuperSqlite) loadPolicy(policy string) error { //nolint:cyclop
