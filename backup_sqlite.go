@@ -443,11 +443,12 @@ type SqliteBackup struct {
 }
 
 func (s SqliteBackup) ToString() string {
+	kind := "incr"
 	if s.IsFull {
-		return fmt.Sprintf("%d: %s %s %s (FULL)", s.ID, s.Username, s.Timestamp, s.Filename)
+		kind = "FULL"
 	}
 
-	return fmt.Sprintf("%d: %s %s %s (incr)", s.ID, s.Username, s.Timestamp, s.Filename)
+	return fmt.Sprintf("%4d | %-10s | %-30s | %-20s | %s", s.ID, s.Username, s.Timestamp, s.Filename, kind)
 }
 
 func ListSqliteBackups(ctx context.Context, dbfilename, username string) ([]SqliteBackup, error) {

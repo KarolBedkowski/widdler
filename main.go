@@ -248,6 +248,8 @@ func listSqliteBackups(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	fmt.Printf("%4s | %-10s | %-30s | %-20s | %s\n", "ID", "User name", "Date time", "File name", "Kind") //nolint:forbidgo
+
 	for _, r := range res {
 		fmt.Println(r.ToString()) //nolint:forbidigo
 	}
