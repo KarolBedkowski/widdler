@@ -1,4 +1,5 @@
 widdler
+widdler-ng
 .htpasswd
 dist/
 .idea
@@ -7,3 +8,6 @@ dist/
 result
 tags
 wikis
+*.sqlite
+*.html
+/tmp/
