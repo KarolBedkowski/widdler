@@ -4,7 +4,7 @@
 #
 .PHONY: build
 build: # empty.html.bz2
-	go build -o widdler -ldflags "-s -w" .
+	go build -o widdler-ng -ldflags "-s -w" .
 
 #empty.html.bz2: empty.html
 #	bzip2 -9kf empty.html

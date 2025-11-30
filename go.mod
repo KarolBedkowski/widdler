@@ -1,4 +1,4 @@
-module suah.dev/widdler
+module gitlab.com/kabes/widdler-ex
 
 go 1.25.0
 

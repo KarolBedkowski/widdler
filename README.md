@@ -1,10 +1,11 @@
-widdler
-=======
+widdler-ng
+===========
 
-widdler is a single binary that serves up
-[TiddlyWiki](https://tiddlywiki.com)s.
+widdler is a single binary that serves up [TiddlyWiki](https://tiddlywiki.com)s.
 
 It can be used to serve existing wikis, or to create new ones.
+
+Widdler-ng is fork of [Widdler](suah.dev/widdler).
 
 # Features
 
@@ -12,10 +13,9 @@ It can be used to serve existing wikis, or to create new ones.
 - Automatically create new wiki files by browsing to a non-existent html file.
 - Built in .htpasswd management (Adding users).
 - Password protection via HTTP Basic Authentication.
-- Multiple users (adding another user to the .htaccess file creates a new user
-  namespace).
+- Multiple users (adding another user to the .htaccess file creates a new user namespace).
 - Optional TLS support.
-- Backups on file save.
+- Backups on file save using local files, git repository or sqlite database.
 
 # Installation
 
@@ -29,12 +29,12 @@ By default for git backups is used external (system) git. To use buildin impleme
 
 # Running
 
-Run `widdler -h` to see all options.
+Run `widdler-ng -h` to see all options.
 
 ## Single user mode
 ```
 mkdir wiki
-widdler serve
+widdler-ng serve
 ```
 
 ## Multiuser mode
@@ -43,11 +43,11 @@ widdler serve
 mkdir wiki
 cd wiki
 # Generate a .htpasswd file:
-widdler gen-htpass
+widdler-ng gen-htpass
 Username: qbit
 Passwd: ******
 # Start the server
-widdler serve --auth=basic
+widdler-ng serve --auth=basic
 ```
 
 Now open your browser to [http://localhost:8080](http://localhost:8080).
@@ -89,7 +89,7 @@ Old backup files are deleted in background.
 ### Example
 
 ```
-widdler serve --backup=file --backup.policy=7,5 --wikis ./wiki/ --backup.interval 5
+widdler-ng serve --backup=file --backup.policy=7,5 --wikis ./wiki/ --backup.interval 5
 ```
 
 ## "Sqlite" mode
@@ -111,7 +111,7 @@ Old backup files are deleted in background.
 ### Example
 
 ```
-widdler serve --backup=sqlite --backup.policy=7,5 --wikis=./wiki/ --backup.interval=5 --backup.sqlite_file=backup.sqlite
+widdler-ng serve --backup=sqlite --backup.policy=7,5 --wikis=./wiki/ --backup.interval=5 --backup.sqlite_file=backup.sqlite
 ```
 
 
@@ -126,6 +126,6 @@ widdler serve --backup=sqlite --backup.policy=7,5 --wikis=./wiki/ --backup.inter
 Example:
 
 ```
-widdler serve --wikis=./wiki/ --backup.mode=git-once
-widdler serve --wikis=./wiki/ --backup.interval=10 --backup.mode=git
+widdler-ng serve --wikis=./wiki/ --backup.mode=git-once
+widdler-ng serve --wikis=./wiki/ --backup.interval=10 --backup.mode=git
 ```
