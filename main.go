@@ -11,92 +11,11 @@ import (
 	"github.com/urfave/cli/v3"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
-	"suah.dev/protect"
 )
 
 // -------------------------------------------------------------------
 
 var build = "dev"
-
-// -------------------------------------------------------------------
-
-func secure(path ...string) string {
-	pledges := "stdio wpath rpath cpath tty inet dns unveil"
-	// These are OpenBSD specific protections used to prevent unnecessary file access.
-	for _, p := range path {
-		_ = protect.Unveil(p, "rwc")
-	}
-
-	_ = protect.Unveil("/etc/ssl/cert.pem", "r")
-	_ = protect.Unveil("/etc/resolv.conf", "r")
-	_ = protect.Pledge(pledges)
-
-	return pledges
-}
-
-// -------------------------------------------------------------------
-
-func prompt(prompt string, secure bool) (string, error) {
-	fmt.Print(prompt) //nolint:forbidigo
-
-	var input string
-
-	if secure {
-		b, err := term.ReadPassword(int(os.Stdin.Fd()))
-		if err != nil {
-			return "", fmt.Errorf("read password error: %w", err)
-		}
-
-		input = string(b)
-	} else if _, err := fmt.Scanln(&input); err != nil {
-		return "", fmt.Errorf("read stdin error: %w", err)
-	}
-
-	if input == "" {
-		return "", fmt.Errorf("empty %q", prompt) //nolint:err113
-	}
-
-	return input, nil
-}
-
-func mainGenPass(ctx context.Context, cmd *cli.Command) error {
-	_ = ctx
-	passPath := cmd.String("htpass")
-
-	user, err := prompt("Username: ", false)
-	if err != nil {
-		return fmt.Errorf("get username error: %w", err)
-	}
-
-	pass, err := prompt("Password: ", true)
-	if err != nil {
-		return fmt.Errorf("get password error: %w", err)
-	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(pass), 11) //nolint:mnd
-	if err != nil {
-		return fmt.Errorf("hash password error: %w", err)
-	}
-
-	const filePerm = 0o600
-
-	f, err := os.OpenFile(passPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
-	if err != nil {
-		return fmt.Errorf("open passfile %q error: %w", passPath, err)
-	}
-
-	if _, err := fmt.Fprintf(f, "%s:%s\n", user, hash); err != nil {
-		return fmt.Errorf("write to passfile error: %w", err)
-	}
-
-	if err = f.Close(); err != nil {
-		return fmt.Errorf("close passfile error: %w", err)
-	}
-
-	fmt.Printf("Added %q to %q\n", user, passPath) //nolint:forbidigo
-
-	return nil
-}
 
 // -------------------------------------------------------------------
 
@@ -219,13 +138,6 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	pledges := secure(server.davDir, server.passPath)
-	pledges, _ = protect.ReducePledges(pledges, "tty")
-
-	// drop to only read on passPath
-	_ = protect.Unveil(server.passPath, "r")
-	_, _ = protect.ReducePledges(pledges, "unveil")
-
 	if err := server.Start(ctx, &backuper); err != nil {
 		return fmt.Errorf("serve error: %w", err)
 	}
@@ -248,10 +160,10 @@ func listSqliteBackups(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	fmt.Printf("%4s | %-10s | %-30s | %-20s | %s\n", "ID", "User name", "Date time", "File name", "Kind") //nolint:forbidgo
+	fmt.Printf("%4s | %-10s | %-30s | %-20s | %s\n", "ID", "User name", "Date time", "File name", "Kind")
 
 	for _, r := range res {
-		fmt.Println(r.ToString()) //nolint:forbidigo
+		fmt.Println(r.ToString())
 	}
 
 	return nil
@@ -275,7 +187,71 @@ func restoreSqliteBackups(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	fmt.Println(string(res)) //nolint:forbidigo
+	fmt.Println(string(res))
+
+	return nil
+}
+
+// -------------------------------------------------------------------
+
+func prompt(prompt string, secure bool) (string, error) {
+	fmt.Print(prompt)
+
+	var input string
+
+	if secure {
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		if err != nil {
+			return "", fmt.Errorf("read password error: %w", err)
+		}
+
+		input = string(b)
+	} else if _, err := fmt.Scanln(&input); err != nil {
+		return "", fmt.Errorf("read stdin error: %w", err)
+	}
+
+	if input == "" {
+		return "", fmt.Errorf("empty %q", prompt) //nolint:err113
+	}
+
+	return input, nil
+}
+
+func mainGenPass(ctx context.Context, cmd *cli.Command) error {
+	_ = ctx
+	passPath := cmd.String("htpass")
+
+	user, err := prompt("Username: ", false)
+	if err != nil {
+		return fmt.Errorf("get username error: %w", err)
+	}
+
+	pass, err := prompt("Password: ", true)
+	if err != nil {
+		return fmt.Errorf("get password error: %w", err)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(pass), 11) //nolint:mnd
+	if err != nil {
+		return fmt.Errorf("hash password error: %w", err)
+	}
+
+	const filePerm = 0o600
+
+	f, err := os.OpenFile(passPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
+	if err != nil {
+		return fmt.Errorf("open passfile %q error: %w", passPath, err)
+	}
+
+	if _, err := fmt.Fprintf(f, "%s:%s\n", user, hash); err != nil {
+		return fmt.Errorf("write to passfile error: %w", err)
+	}
+
+	if err = f.Close(); err != nil {
+		return fmt.Errorf("close passfile error: %w", err)
+	}
+
+	fmt.Printf("Added %q to %q\n", user, passPath)
 
 	return nil
 }

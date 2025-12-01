@@ -435,10 +435,10 @@ func decompressContent(content []byte) ([]byte, error) {
 }
 
 type SqliteBackup struct {
-	ID        int64
-	Username  string
 	Timestamp time.Time
+	Username  string
 	Filename  string
+	ID        int64
 	IsFull    bool
 }
 

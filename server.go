@@ -59,15 +59,15 @@ var CtxUserKey = any("ctx_user_key")
 // -------------------------------------------------------------------
 
 type userHandler struct {
-	b          *Backuper
-	mu         sync.Mutex
-	dav        *webdav.Handler
 	fs         http.Handler
+	b          *Backuper
+	dav        *webdav.Handler
+	root       *os.Root
 	user       string
 	pass       string
 	home       string
-	root       *os.Root
 	fullListen string
+	mu         sync.Mutex
 }
 
 func newUserHandler(user, pass, homedir, fullListen string, backuper *Backuper) *userHandler {
@@ -278,8 +278,8 @@ func getFirstHeaderByPrefix(h http.Header, prefix string) (string, string) {
 type userHandlers map[string]*userHandler
 
 type MultiUserHandler struct {
-	auth     string
 	handlers userHandlers
+	auth     string
 }
 
 func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

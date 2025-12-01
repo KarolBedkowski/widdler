@@ -14,7 +14,6 @@ require (
 	golang.org/x/net v0.47.0
 	golang.org/x/term v0.37.0
 	modernc.org/sqlite v1.40.1
-	suah.dev/protect v1.2.4
 )
 
 require (

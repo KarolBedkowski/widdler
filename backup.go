@@ -35,11 +35,11 @@ const (
 )
 
 type Backuper struct {
-	enabled    bool
-	interval   int
-	backupsAge map[string]time.Time
 	handler    BackupHandler
+	backupsAge map[string]time.Time
 	mode       string
+	interval   int
+	enabled    bool
 }
 
 func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
