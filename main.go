@@ -22,7 +22,7 @@ var build = "dev"
 func main() { //nolint:funlen
 	//nolint:exhaustruct
 	cmd := &cli.Command{
-		Name:    "widdler",
+		Name:    "widdler-ex",
 		Version: build,
 		Flags: []cli.Flag{
 			&cli.StringFlag{

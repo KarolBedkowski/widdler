@@ -1,11 +1,11 @@
-widdler-ng
+widdler-ex
 ===========
 
 widdler is a single binary that serves up [TiddlyWiki](https://tiddlywiki.com)s.
 
 It can be used to serve existing wikis, or to create new ones.
 
-Widdler-ng is fork of [Widdler](suah.dev/widdler).
+Widdler-ex is fork of [Widdler](suah.dev/widdler).
 
 # Features
 
@@ -29,12 +29,12 @@ By default for git backups is used external (system) git. To use buildin impleme
 
 # Running
 
-Run `widdler-ng -h` to see all options.
+Run `widdler-ex -h` to see all options.
 
 ## Single user mode
 ```
 mkdir wiki
-widdler-ng serve
+widdler-ex serve
 ```
 
 ## Multiuser mode
@@ -43,11 +43,11 @@ widdler-ng serve
 mkdir wiki
 cd wiki
 # Generate a .htpasswd file:
-widdler-ng gen-htpass
+widdler-ex gen-htpass
 Username: qbit
 Passwd: ******
 # Start the server
-widdler-ng serve --auth=basic
+widdler-ex serve --auth=basic
 ```
 
 Now open your browser to [http://localhost:8080](http://localhost:8080).
@@ -89,7 +89,7 @@ Old backup files are deleted in background.
 ### Example
 
 ```
-widdler-ng serve --backup=file --backup.policy=7,5 --wikis ./wiki/ --backup.interval 5
+widdler-ex serve --backup=file --backup.policy=7,5 --wikis ./wiki/ --backup.interval 5
 ```
 
 ## "Sqlite" mode
@@ -111,7 +111,7 @@ Old backup files are deleted in background.
 ### Example
 
 ```
-widdler-ng serve --backup=sqlite --backup.policy=7,5 --wikis=./wiki/ --backup.interval=5 --backup.sqlite_file=backup.sqlite
+widdler-ex serve --backup=sqlite --backup.policy=7,5 --wikis=./wiki/ --backup.interval=5 --backup.sqlite_file=backup.sqlite
 ```
 
 
@@ -126,6 +126,6 @@ widdler-ng serve --backup=sqlite --backup.policy=7,5 --wikis=./wiki/ --backup.in
 Example:
 
 ```
-widdler-ng serve --wikis=./wiki/ --backup.mode=git-once
-widdler-ng serve --wikis=./wiki/ --backup.interval=10 --backup.mode=git
+widdler-ex serve --wikis=./wiki/ --backup.mode=git-once
+widdler-ex serve --wikis=./wiki/ --backup.interval=10 --backup.mode=git
 ```
