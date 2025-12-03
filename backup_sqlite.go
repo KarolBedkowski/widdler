@@ -75,7 +75,14 @@ func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress 
 }
 
 func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, file string) error {
-	tx, err := b.db.BeginTx(ctx, nil)
+	conn, err := b.getConnection(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer conn.Close()
+
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin db transaction failed: %w", err)
 	}
@@ -133,7 +140,7 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 		return nil
 	}
 
-	conn, err := b.db.Conn(ctx)
+	conn, err := b.getConnection(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to open db connection: %w", err)
 	}
@@ -172,11 +179,32 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 		}
 	}
 
-	if _, err := b.db.ExecContext(ctx, "VACUUM"); err != nil {
+	if _, err := b.db.ExecContext(ctx, "VACUUM; PRAGMA optimize;"); err != nil {
 		return fmt.Errorf("run vacuum failed: %w", err)
 	}
 
 	return nil
+}
+
+func (b *BackuperSqlite) getConnection(ctx context.Context) (*sql.Conn, error) {
+	conn, err := b.db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open db connection failed: %w", err)
+	}
+
+	_, err = conn.ExecContext(ctx, `
+PRAGMA page_size = 8192;
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA temp_store = MEMORY;
+`)
+	if err != nil {
+		conn.Close()
+
+		return nil, fmt.Errorf("run db init conn script failed: %w", err)
+	}
+
+	return conn, nil
 }
 
 type UserFile struct {
