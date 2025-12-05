@@ -98,7 +98,7 @@ func main() { //nolint:funlen
 					},
 					&cli.StringFlag{Name: "username", Usage: "Username for filter backups"},
 				},
-				Action: listSqliteBackups,
+				Action: listSqliteBackupsCmd,
 			},
 			{
 				Name: "restore-backup",
@@ -147,7 +147,7 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 
 // -------------------------------------------------------------------
 
-func listSqliteBackups(ctx context.Context, cmd *cli.Command) error {
+func listSqliteBackupsCmd(ctx context.Context, cmd *cli.Command) error {
 	dbfilename := cmd.String("file")
 	if dbfilename == "" {
 		return errors.New("missing database filename") //nolint:err113

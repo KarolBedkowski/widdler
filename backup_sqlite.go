@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -184,6 +185,51 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 	}
 
 	return nil
+}
+
+func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter, r *http.Request,
+	root *os.Root, user string,
+) bool {
+	url := r.URL.Path
+
+	slog.DebugContext(ctx, "ListHandler", "url", url)
+
+	prefix := "/_backups"
+	if user != "" {
+		prefix = "/" + user + prefix
+	}
+
+	if !strings.HasPrefix(url, prefix) {
+		return false
+	}
+
+	conn, err := b.getConnection(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "ListHandler failed to get db connection", "err", err)
+
+		return false
+	}
+
+	backups, err := listSqliteBackups(ctx, conn, user)
+	if err != nil {
+		slog.ErrorContext(ctx, "ListHandler failed to get backups", "err", err)
+
+		return false
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, "<!doctype html>\n")
+	fmt.Fprintf(w, "<meta name=\"viewport\" content=\"width=device-width\">\n")
+	fmt.Fprintf(w, "<pre>\n")
+
+	for _, b := range backups {
+		//#url := url.URL{Path: name}
+		//fmt.Fprintf(w, "<a href=\"%s\">%s</a>\n", url.String(), htmlReplacer.Replace(name))
+		fmt.Fprintf(w, "%s %s\n", b.Filename, b.Timestamp)
+	}
+	fmt.Fprintf(w, "</pre>\n")
+
+	return true
 }
 
 func (b *BackuperSqlite) getConnection(ctx context.Context) (*sql.Conn, error) {
@@ -480,14 +526,28 @@ func (s SqliteBackup) ToString() string {
 }
 
 func ListSqliteBackups(ctx context.Context, dbfilename, username string) ([]SqliteBackup, error) {
-	conn, err := sql.Open("sqlite", dbfilename)
+	db, err := sql.Open("sqlite", dbfilename)
 	if err != nil {
 		return nil, fmt.Errorf("open database file failed: %w", err)
 	}
 
+	defer db.Close()
+
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open db connection failed: %w", err)
+	}
+
 	defer conn.Close()
 
-	var rows *sql.Rows
+	return listSqliteBackups(ctx, conn, username)
+}
+
+func listSqliteBackups(ctx context.Context, conn *sql.Conn, username string) ([]SqliteBackup, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
 
 	if username != "" {
 		rows, err = conn.QueryContext(ctx,

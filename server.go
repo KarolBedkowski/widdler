@@ -108,6 +108,10 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx = context.WithValue(ctx, CtxUserKey, u.user)
 	r = r.WithContext(ctx)
 
+	if u.b.handleBackupsPage(ctx, w, r, u.root, u.user) {
+		return
+	}
+
 	fullPath := filepath.Clean(path.Join(".", r.URL.Path))
 	if fullPath == "" {
 		http.Error(w, "Bad request", http.StatusBadRequest)

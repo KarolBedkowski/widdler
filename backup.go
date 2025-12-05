@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
@@ -163,4 +164,21 @@ func (b *Backuper) cleanWorker(ctx context.Context, users []string) {
 
 		<-c
 	}
+}
+
+func (b *Backuper) handleBackupsPage(ctx context.Context, w http.ResponseWriter, r *http.Request, root *os.Root, user string) bool {
+	if !b.enabled {
+		return false
+	}
+
+	type backupListHandler interface {
+		ListHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, root *os.Root, user string) bool
+	}
+
+	bh, ok := b.handler.(backupListHandler)
+	if ok {
+		return bh.ListHandler(ctx, w, r, root, user)
+	}
+
+	return false
 }
