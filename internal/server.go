@@ -117,7 +117,7 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Everything else is browsable
-	if err := u.handleBrowse(w, r); err == nil {
+	if err := u.handleBrowse(w, r, fullPath); err == nil {
 		return
 	} else if !errors.Is(err, ErrNotFound) {
 		slog.ErrorContext(ctx, "handle browse error", "path", r.URL.Path, "err", err)
@@ -170,10 +170,10 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPat
 	return nil
 }
 
-func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request) error {
+func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpath string) error {
 	rdfs, _ := u.root.FS().(fs.ReadDirFS)
 
-	entries, err := rdfs.ReadDir(".")
+	entries, err := rdfs.ReadDir(reqpath)
 	switch {
 	case err != nil:
 		return fmt.Errorf("read dir %q error: %w", u.home, err)
@@ -192,7 +192,43 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request) error
 		}
 	}
 
-	u.fs.ServeHTTP(w, r)
+	files := make([]fs.DirEntry, 0, len(entries))
+	dirs := make([]fs.DirEntry, 0, len(entries))
+
+	for _, e := range entries {
+		if e.Name()[0] == '.' {
+			continue
+		}
+
+		if e.IsDir() {
+			dirs = append(dirs, e)
+		} else {
+			files = append(files, e)
+		}
+	}
+
+	parent := filepath.Dir(reqpath)
+	if reqpath == "." {
+		parent = ""
+		reqpath = ""
+	}
+
+	data := struct {
+		Files  []fs.DirEntry
+		Dirs   []fs.DirEntry
+		Parent string
+		Path   string
+	}{
+		Files:  files,
+		Dirs:   dirs,
+		Parent: parent,
+		Path:   reqpath,
+	}
+
+	if err := appTemplates.ExecuteTemplate(w, "list.tmpl", &data); err != nil {
+		return fmt.Errorf("execute template error: %w", err)
+	}
+	//	u.fs.ServeHTTP(w, r)
 
 	return nil
 }
