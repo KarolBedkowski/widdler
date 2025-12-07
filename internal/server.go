@@ -214,15 +214,17 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpa
 	}
 
 	data := struct {
-		Files  []fs.DirEntry
-		Dirs   []fs.DirEntry
-		Parent string
-		Path   string
+		Files             []fs.DirEntry
+		Dirs              []fs.DirEntry
+		Parent            string
+		Path              string
+		SupportBackupsDir bool
 	}{
-		Files:  files,
-		Dirs:   dirs,
-		Parent: parent,
-		Path:   reqpath,
+		Files:             files,
+		Dirs:              dirs,
+		Parent:            parent,
+		Path:              reqpath,
+		SupportBackupsDir: u.b.supportBackupsPage,
 	}
 
 	if err := appTemplates.ExecuteTemplate(w, "list.tmpl", &data); err != nil {

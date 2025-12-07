@@ -20,7 +20,7 @@
 <body>
 
 <h1>Widdler-ex <small>{{ .Path }}</small></h1>
-<a href="/_backups">Backups</a>
+{{ if .SupportBackupsDir }} <a href="/_backups">Backups</a>{{ end }}
 <hr/>
 
 {{ $base := .Path }}

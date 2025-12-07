@@ -35,11 +35,12 @@ const (
 )
 
 type Backuper struct {
-	handler    BackupHandler
-	backupsAge map[string]time.Time
-	mode       string
-	interval   int
-	enabled    bool
+	handler            BackupHandler
+	backupsAge         map[string]time.Time
+	mode               string
+	interval           int
+	enabled            bool
+	supportBackupsPage bool
 }
 
 func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
@@ -85,6 +86,10 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 	}
 
 	slog.Info("backup enabled", "backup_mode", backuper.mode)
+
+	if _, ok := backuper.handler.(backupListHandler); ok {
+		backuper.supportBackupsPage = true
+	}
 
 	return backuper, nil
 }
@@ -171,14 +176,14 @@ func (b *Backuper) handleBackupsPage(
 		return false
 	}
 
-	type backupListHandler interface {
-		ListHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, root *os.Root, user string) bool
-	}
-
 	bh, ok := b.handler.(backupListHandler)
 	if ok {
 		return bh.ListHandler(ctx, w, r, root, user)
 	}
 
 	return false
+}
+
+type backupListHandler interface {
+	ListHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, root *os.Root, user string) bool
 }
