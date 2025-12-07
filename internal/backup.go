@@ -30,10 +30,8 @@ type BackupHandler interface {
 }
 
 const (
-	backupModeFile    = "file"
-	backupModeGIT     = "git"
-	backupModeGITOnce = "git-once"
-	backupModeSqlite  = "sqlite"
+	backupModeFile   = "file"
+	backupModeSqlite = "sqlite"
 )
 
 type Backuper struct {
@@ -74,8 +72,6 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 
 		backuper.handler = &b
 
-	case backupModeGIT, backupModeGITOnce:
-		backuper.handler = &BackuperGit{}
 	case "":
 		slog.Info("Backups disabled")
 
@@ -134,11 +130,6 @@ func (b *Backuper) needBackup(srcFilePath string) bool {
 		// new day, always create backup
 		if oldBackupTs.YearDay() != now.YearDay() || now.Year() != oldBackupTs.Year() {
 			return true
-		}
-
-		// in git-once backup mode create only one backup for each file in run
-		if b.mode == "git-once" {
-			return false
 		}
 
 		// for other modes skip backup when oldbackup is not older that interval.

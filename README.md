@@ -15,17 +15,13 @@ Widdler-ex is fork of [Widdler](suah.dev/widdler).
 - Password protection via HTTP Basic Authentication.
 - Multiple users (adding another user to the .htaccess file creates a new user namespace).
 - Optional TLS support.
-- Backups on file save using local files, git repository or sqlite database.
+- Backups on file save using local files or sqlite database.
 
 # Installation
 
 ```
 go install .
 ```
-
-By default for git backups is used external (system) git. To use buildin implementation compile/install with
-`-tags gitint` parameter. Builtin implementation may be faster on windows system.
-
 
 # Running
 
@@ -69,7 +65,6 @@ Widdler can backup current file before write changes.
 
 Widdler support two main modes for backup (selected by `--backup.mode` argument):
 - copy files into backup directory (`file` mode)
-- put file into git repository (`git`, `git-once` modes)
 - keep backups (full and incremental) in sqlite database (`sqlite` mode)
 
 `--backup.interval` argument set minimal time (in seconds) between write changes of each file.
@@ -112,20 +107,4 @@ Old backup files are deleted in background.
 
 ```
 widdler-ex serve --backup=sqlite --backup.policy=7,5 --wikis=./wiki/ --backup.interval=5 --backup.sqlite_file=backup.sqlite
-```
-
-
-## "Git*" modes
-
-"git" and "git-once" open or create if not exists git repository in wikis directory (or user home).
-
-"git" mode commit each change of file (if file change and after `interval` since last file write).
-
-"git-once" create only one backup on first file change each day (or since widdler start).
-
-Example:
-
-```
-widdler-ex serve --wikis=./wiki/ --backup.mode=git-once
-widdler-ex serve --wikis=./wiki/ --backup.interval=10 --backup.mode=git
 ```
