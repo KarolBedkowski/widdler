@@ -11,6 +11,7 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql"
+	"embed"
 	"errors"
 	"fmt"
 	"html/template"
@@ -30,6 +31,16 @@ const (
 	maxFileSize            = 1024 * 1024 * 128            // 128 MB
 	createNextFullInterval = time.Duration(8) * time.Hour // create full backup every 8h
 )
+
+//go:embed tmpl/*.tmpl
+var templatesFS embed.FS
+var backupListTmpl *template.Template
+
+func init() {
+	backupListTmpl = template.Must(template.ParseFS(templatesFS, "tmpl/*.tmpl"))
+}
+
+//------------------------------------------------------------------------------
 
 type BackuperSqlite struct {
 	db               *sql.DB
@@ -218,6 +229,7 @@ func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter,
 	backupid, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
 		slog.ErrorContext(ctx, "parse backup id failed", "err", err, "parts", parts)
+		w.WriteHeader(http.StatusBadRequest)
 
 		return false
 	}
@@ -226,7 +238,7 @@ func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter,
 	case "view":
 		return b.viewBackupHandler(ctx, w, user, backupid)
 	case "restore":
-		return b.restoreBackupHandler(ctx, w, root, user, backupid)
+		return b.restoreBackupHandler(ctx, w, r, root, user, backupid)
 	}
 
 	return false
@@ -238,6 +250,7 @@ func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.Response
 	conn, err := b.getConnection(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "ListHandler failed to get db connection", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
 
 		return false
 	}
@@ -245,6 +258,7 @@ func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.Response
 	backups, err := listSqliteBackups(ctx, conn, user)
 	if err != nil {
 		slog.ErrorContext(ctx, "ListHandler failed to get backups", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
 
 		return false
 	}
@@ -259,8 +273,9 @@ func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.Response
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	if err := backupListTmpl.Execute(w, &data); err != nil {
+	if err := backupListTmpl.ExecuteTemplate(w, "sqliteindexpage.tmpl", &data); err != nil {
 		slog.ErrorContext(ctx, "ListHandler failed to render", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 
 	return true
@@ -271,6 +286,7 @@ func (b *BackuperSqlite) viewBackupHandler(ctx context.Context, w http.ResponseW
 	conn, err := b.getConnection(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "get db connection failed", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
 
 		return true
 	}
@@ -280,12 +296,14 @@ func (b *BackuperSqlite) viewBackupHandler(ctx context.Context, w http.ResponseW
 	data, err := getFileFromDb(ctx, conn, backupid)
 	if err != nil {
 		slog.ErrorContext(ctx, "get file form db connection failed", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
 
 		return true
 	}
 
 	if data.Username != user {
 		slog.ErrorContext(ctx, "invalid user", "backup.user", data.Username, "user", user)
+		w.WriteHeader(http.StatusNotFound)
 
 		return true
 	}
@@ -296,12 +314,13 @@ func (b *BackuperSqlite) viewBackupHandler(ctx context.Context, w http.ResponseW
 	return false
 }
 
-func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.ResponseWriter,
+func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.ResponseWriter, r *http.Request,
 	root *os.Root, user string, backupid int64,
 ) bool {
 	conn, err := b.getConnection(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "get db connection failed", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
 
 		return true
 	}
@@ -311,24 +330,38 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 	data, err := getFileFromDb(ctx, conn, backupid)
 	if err != nil {
 		slog.ErrorContext(ctx, "get file form db connection failed", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
 
 		return true
 	}
 
 	if data.Username != user {
 		slog.ErrorContext(ctx, "invalid user", "backup.user", data.Username, "user", user)
+		w.WriteHeader(http.StatusNotFound)
 
 		return true
 	}
 
-	if err := root.WriteFile(data.Filename, data.Data, 0o660); err != nil { //nolint:mnd
-		slog.ErrorContext(ctx, "write file error", "backup.filename", data.Filename, "err", err)
+	fname := r.FormValue("filename")
+
+	if r.Method == http.MethodPost && fname != "" {
+		if err := root.WriteFile(fname, data.Data, 0o660); err != nil { //nolint:mnd
+			slog.ErrorContext(ctx, "write file error", "backup.filename", data.Filename, "err", err)
+			w.WriteHeader(http.StatusInternalServerError)
+
+			return true
+		}
+
+		w.Header().Set("Location", "/")
+		w.WriteHeader(http.StatusFound)
 
 		return true
 	}
 
-	w.Header().Set("Location", "/")
-	w.WriteHeader(http.StatusFound)
+	if err := backupListTmpl.ExecuteTemplate(w, "sqliterestorepage.tmpl", &data); err != nil {
+		slog.ErrorContext(ctx, "restoreBackupHandler failed to render", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
+	}
 
 	return true
 }
@@ -593,6 +626,8 @@ func (*BackuperSqlite) compressContent(content []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+//------------------------------------------------------------------------------
+
 func decompressContent(content []byte) ([]byte, error) {
 	buf := bytes.NewBuffer(content)
 	zr, _ := gzip.NewReader(buf)
@@ -608,6 +643,8 @@ func decompressContent(content []byte) ([]byte, error) {
 
 	return bufout.Bytes(), nil
 }
+
+//------------------------------------------------------------------------------
 
 type SqliteBackup struct {
 	Timestamp time.Time
@@ -626,6 +663,8 @@ func (s SqliteBackup) ToString() string {
 
 	return fmt.Sprintf("%4d | %-10s | %-30s | %-20s | %s", s.ID, s.Username, s.Timestamp, s.Filename, kind)
 }
+
+//------------------------------------------------------------------------------
 
 func ListSqliteBackups(ctx context.Context, dbfilename, username string) ([]SqliteBackup, error) {
 	db, err := sql.Open("sqlite", dbfilename)
@@ -690,6 +729,7 @@ func listSqliteBackups(ctx context.Context, conn *sql.Conn, username string) ([]
 	return backups, nil
 }
 
+// ------------------------------------------------------------------------------
 func RestoreSqliteBackup(
 	ctx context.Context,
 	dbfilename string,
@@ -716,6 +756,8 @@ func RestoreSqliteBackup(
 
 	return backup.Data, nil
 }
+
+//------------------------------------------------------------------------------
 
 func getFileFromDb(ctx context.Context, conn *sql.Conn, backupid int64) (*SqliteBackup, error) { //nolint:cyclop
 	var (
@@ -785,26 +827,4 @@ func getFileFromDb(ctx context.Context, conn *sql.Conn, backupid int64) (*Sqlite
 	backup.Data = []byte(result)
 
 	return &backup, nil
-}
-
-var backupListTmpl *template.Template
-
-func init() {
-	var err error
-
-	backupListTmpl, err = template.New("").Parse(`<!doctype html>
-<meta name="viewport" content="width=device-width">
-<table><thead><tr><th>File</th><th>Date</th><th>Action</th></tr></th><tbody>
-	{{ $prefix := .Prefix }}
-	{{ range .Backups }}
-	<tr>
-		<td><a href="{{ $prefix }}/{{ .ID }}/view">{{ .Filename }}</a></td>
-		<td>{{.Timestamp}}</td>
-		<td><a href="{{ $prefix }}/{{ .ID }}/restore">Restore</a></td>
-	{{end}}
-</tbody></table>
-`)
-	if err != nil {
-		panic(err)
-	}
 }

@@ -1,0 +1,16 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width">
+
+
+<h1>Backups</h1>
+
+<table><thead><tr><th>File</th><th>Date</th><th>Action</th></tr></th><tbody>
+	{{ $prefix := .Prefix }}
+	{{ range .Backups }}
+	<tr>
+		<td><a href="{{ $prefix }}/{{ .ID }}/view">{{ .Filename }}</a></td>
+		<td>{{.Timestamp}}</td>
+		<td><a href="{{ $prefix }}/{{ .ID }}/restore">Restore</a></td>
+	{{end}}
+</tbody></table>
+

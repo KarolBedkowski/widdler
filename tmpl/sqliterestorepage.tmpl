@@ -1,0 +1,10 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width">
+
+<h1>Restore file {{ .Filename }}</h1>
+
+<form method="POST">
+	<label>Target filename: </label>
+	<input type="text" name="filename" value="{{ .Filename }}" />
+	<button type="submit">Restore</button>
+</form>
