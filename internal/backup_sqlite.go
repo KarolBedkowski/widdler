@@ -207,9 +207,6 @@ func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter,
 	slog.DebugContext(ctx, "ListHandler", "url", url)
 
 	prefix := "/_backups"
-	if user != "" {
-		prefix = "/" + user + prefix
-	}
 
 	if url == prefix || url == prefix+"/" {
 		return b.listBackupsHandler(ctx, w, user, prefix)
