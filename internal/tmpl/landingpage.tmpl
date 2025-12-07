@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="data:image/png;base64,">
+</head>
+<body>
+
+<h1>Hello{{if .User}} {{.User}}{{end}}! Welcome to widdler-ex!</h1>
+
+<p>To create a new TiddlyWiki html file, simply append an html file name to the URL in the address bar!</p>
+
+<h3>For example:</h3>
+
+<a href="{{.URL}}">{{.URL}}</a>
+
+<p>This will create a new wiki called "<b>wiki.html</b>"</p>
+
+<p>After creating a wiki, this message will be replaced by a list of your wiki files.</p>
+
+</body>
+</html>

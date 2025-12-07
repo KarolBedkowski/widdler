@@ -11,10 +11,8 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql"
-	"embed"
 	"errors"
 	"fmt"
-	"html/template"
 	"io"
 	"log/slog"
 	"net/http"
@@ -31,14 +29,6 @@ const (
 	maxFileSize            = 1024 * 1024 * 128            // 128 MB
 	createNextFullInterval = time.Duration(8) * time.Hour // create full backup every 8h
 )
-
-//go:embed tmpl/*.tmpl
-var templatesFS embed.FS
-var backupListTmpl *template.Template
-
-func init() {
-	backupListTmpl = template.Must(template.ParseFS(templatesFS, "tmpl/*.tmpl"))
-}
 
 //------------------------------------------------------------------------------
 
@@ -274,7 +264,7 @@ func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.Response
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	if err := backupListTmpl.ExecuteTemplate(w, "sqliteindexpage.tmpl", &data); err != nil {
+	if err := appTemplates.ExecuteTemplate(w, "sqliteindexpage.tmpl", &data); err != nil {
 		slog.ErrorContext(ctx, "sqlitebackup: failed to render index", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 	}
@@ -355,7 +345,7 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 		return
 	}
 
-	if err := backupListTmpl.ExecuteTemplate(w, "sqliterestorepage.tmpl", &data); err != nil {
+	if err := appTemplates.ExecuteTemplate(w, "sqliterestorepage.tmpl", &data); err != nil {
 		slog.ErrorContext(ctx, "restoreBackupHandler failed to render", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 	}

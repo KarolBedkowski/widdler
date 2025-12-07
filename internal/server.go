@@ -18,7 +18,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"text/template"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -26,20 +25,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/net/webdav"
 )
-
-const landingPage = `
-<h1>Hello{{if .User}} {{.User}}{{end}}! Welcome to widdler!</h1>
-
-<p>To create a new TiddlyWiki html file, simply append an html file name to the URL in the address bar!</p>
-
-<h3>For example:</h3>
-
-<a href="{{.URL}}">{{.URL}}</a>
-
-<p>This will create a new wiki called "<b>wiki.html</b>"</p>
-
-<p>After creating a wiki, this message will be replaced by a list of your wiki files.</p>
-`
 
 const emptyURL = "https://tiddlywiki.com/empty.html"
 
@@ -219,12 +204,7 @@ func (u *userHandler) handleLanding(w http.ResponseWriter) error {
 		URL  string
 	}{u.user, u.fullListen + "/wiki.html"}
 
-	templ, err := template.New("landing").Parse(landingPage)
-	if err != nil {
-		return fmt.Errorf("parse landing pager error: %w", err)
-	}
-
-	if err := templ.ExecuteTemplate(w, "landing", l); err != nil {
+	if err := appTemplates.ExecuteTemplate(w, "landingpage.tmpl", l); err != nil {
 		return fmt.Errorf("execute template error: %w", err)
 	}
 
