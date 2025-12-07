@@ -2,11 +2,12 @@ package main
 
 import (
 	"gitlab.com/kabes/widdler-ex/internal"
+	_ "modernc.org/sqlite"
 )
 
 // -------------------------------------------------------------------
 
-func main() { //nolint:funlen
+func main() {
 	internal.Main()
 }
 

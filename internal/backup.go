@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v3"
+	slogctx "github.com/veqryn/slog-context"
 )
 
 const cleanTaskInterval = 300 // sec
@@ -100,6 +101,8 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 	if !b.enabled {
 		return nil
 	}
+
+	ctx = slogctx.With(ctx, slog.String("file", srcFilePath))
 
 	if _, err := root.Stat(srcFilePath); err != nil {
 		if os.IsNotExist(err) {

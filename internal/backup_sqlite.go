@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
-	_ "modernc.org/sqlite"
+	slogctx "github.com/veqryn/slog-context"
 )
 
 const (
@@ -110,15 +110,15 @@ func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, fi
 	if b.numIncrBackups > 0 {
 		lastFullContent, parentID, err = b.getPrevContent(ctx, tx, username, file)
 		if err != nil {
-			return fmt.Errorf("read prev backup failed: %w", err)
+			return fmt.Errorf("read prev backup from db failed: %w", err)
 		}
 
-		slog.DebugContext(ctx, "prev content", "len", len(lastFullContent))
+		slog.DebugContext(ctx, "sqlitebackup: loaded prev content", "backup_size", len(lastFullContent))
 	}
 
 	newContentB, err := root.ReadFile(file)
 	if err != nil {
-		return fmt.Errorf("read file %q failed: %w", file, err)
+		return fmt.Errorf("read file %q to backup failed: %w", file, err)
 	}
 
 	isfull := len(lastFullContent) == 0
@@ -130,7 +130,7 @@ func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, fi
 	}
 
 	if len(newContentB) == 0 {
-		slog.DebugContext(ctx, "backup skipped - no changes")
+		slog.DebugContext(ctx, "sqlitebackup: backup skipped - no changes")
 
 		return nil
 	}
@@ -143,7 +143,7 @@ func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, fi
 		return fmt.Errorf("commit changes to db failed: %w", err)
 	}
 
-	slog.DebugContext(ctx, "backup created", "full", isfull, "len", len(newContentB))
+	slog.DebugContext(ctx, "sqlitebackup: backup created ", "full_backup", isfull, "backup_size", len(newContentB))
 
 	return nil
 }
@@ -166,13 +166,15 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 	}
 
 	for _, userfile := range usersfiles {
-		tx, err := b.db.BeginTx(ctx, nil)
+		lctx := slogctx.With(ctx, slog.String("user", userfile.Username), slog.String("file", userfile.Filename))
+
+		tx, err := b.db.BeginTx(lctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin db transaction failed: %w", err)
 		}
 
 		if b.numIncrBackups > 0 {
-			if err := b.deleteIncrBackups(ctx, tx, userfile.Username, userfile.Filename); err != nil {
+			if err := b.deleteIncrBackups(lctx, tx, userfile.Username, userfile.Filename); err != nil {
 				_ = tx.Rollback()
 
 				return err
@@ -180,7 +182,7 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 		}
 
 		if b.numFullBackups > 0 {
-			if err := b.deleteFullBackups(ctx, tx, userfile.Username, userfile.Filename); err != nil {
+			if err := b.deleteFullBackups(lctx, tx, userfile.Username, userfile.Filename); err != nil {
 				_ = tx.Rollback()
 
 				return err
@@ -203,13 +205,14 @@ func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter,
 	root *os.Root, user string,
 ) bool {
 	url := r.URL.Path
-
-	slog.DebugContext(ctx, "ListHandler", "url", url)
-
 	prefix := "/_backups"
 
+	slog.DebugContext(ctx, "sqlitebackup: list backups", "url", url)
+
 	if url == prefix || url == prefix+"/" {
-		return b.listBackupsHandler(ctx, w, user, prefix)
+		b.listBackupsHandler(ctx, w, user, prefix)
+
+		return true
 	}
 
 	prefix += "/"
@@ -218,6 +221,7 @@ func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter,
 		return false
 	}
 
+	// url in form '<prefix>/<backupid>/<action>'
 	parts := strings.Split(strings.TrimPrefix(url, prefix), "/")
 	if len(parts) != 2 { //nolint:mnd
 		return false
@@ -225,7 +229,7 @@ func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter,
 
 	backupid, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		slog.ErrorContext(ctx, "parse backup id failed", "err", err, "parts", parts)
+		slog.ErrorContext(ctx, "sqlitebackup: parse backup id failed", "err", err, "parts", parts)
 		w.WriteHeader(http.StatusBadRequest)
 
 		return false
@@ -233,31 +237,31 @@ func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter,
 
 	switch parts[1] {
 	case "view":
-		return b.viewBackupHandler(ctx, w, user, backupid)
+		b.viewBackupHandler(ctx, w, user, backupid)
 	case "restore":
-		return b.restoreBackupHandler(ctx, w, r, root, user, backupid)
+		b.restoreBackupHandler(ctx, w, r, root, user, backupid)
+	default:
+		w.WriteHeader(http.StatusNotFound)
 	}
 
-	return false
+	return true
 }
 
-func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.ResponseWriter,
-	user, prefix string,
-) bool {
+func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.ResponseWriter, user, prefix string) {
 	conn, err := b.getConnection(ctx)
 	if err != nil {
-		slog.ErrorContext(ctx, "ListHandler failed to get db connection", "err", err)
+		slog.ErrorContext(ctx, "sqlitebackup: failed to get db connection", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 
-		return false
+		return
 	}
 
 	backups, err := listSqliteBackups(ctx, conn, user)
 	if err != nil {
-		slog.ErrorContext(ctx, "ListHandler failed to get backups", "err", err)
+		slog.ErrorContext(ctx, "sqlitebackup: failed to get backups", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 
-		return false
+		return
 	}
 
 	data := struct {
@@ -271,72 +275,68 @@ func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.Response
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	if err := backupListTmpl.ExecuteTemplate(w, "sqliteindexpage.tmpl", &data); err != nil {
-		slog.ErrorContext(ctx, "ListHandler failed to render", "err", err)
+		slog.ErrorContext(ctx, "sqlitebackup: failed to render index", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 	}
-
-	return true
 }
 
 func (b *BackuperSqlite) viewBackupHandler(ctx context.Context, w http.ResponseWriter, user string, backupid int64,
-) bool {
+) {
 	conn, err := b.getConnection(ctx)
 	if err != nil {
-		slog.ErrorContext(ctx, "get db connection failed", "err", err)
+		slog.ErrorContext(ctx, "sqlitebackup: get db connection failed", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 
-		return true
+		return
 	}
 
 	defer conn.Close()
 
 	data, err := getFileFromDb(ctx, conn, backupid)
 	if err != nil {
-		slog.ErrorContext(ctx, "get file form db connection failed", "err", err)
+		slog.ErrorContext(ctx, "sqlitebackup: get file form db connection failed", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 
-		return true
+		return
 	}
 
 	if data.Username != user {
-		slog.ErrorContext(ctx, "invalid user", "backup.user", data.Username, "user", user)
+		slog.ErrorContext(ctx, "sqlitebackup: invalid user", "backup.user", data.Username, "user", user)
 		w.WriteHeader(http.StatusNotFound)
 
-		return true
+		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(data.Data)
-
-	return false
 }
 
 func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.ResponseWriter, r *http.Request,
 	root *os.Root, user string, backupid int64,
-) bool {
+) {
 	conn, err := b.getConnection(ctx)
 	if err != nil {
-		slog.ErrorContext(ctx, "get db connection failed", "err", err)
+		slog.ErrorContext(ctx, "sqlitebackup: get db connection failed", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 
-		return true
+		return
 	}
 
 	defer conn.Close()
 
 	data, err := getFileFromDb(ctx, conn, backupid)
 	if err != nil {
-		slog.ErrorContext(ctx, "get file form db connection failed", "err", err)
+		slog.ErrorContext(ctx, "sqlitebackup: get file form db connection failed", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 
-		return true
+		return
 	}
 
 	if data.Username != user {
-		slog.ErrorContext(ctx, "invalid user", "backup.user", data.Username, "user", user)
+		slog.ErrorContext(ctx, "sqlitebackup: invalid user", "backup.user", data.Username, "user", user)
 		w.WriteHeader(http.StatusNotFound)
 
-		return true
+		return
 	}
 
 	fname := r.FormValue("filename")
@@ -346,21 +346,19 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 			slog.ErrorContext(ctx, "write file error", "backup.filename", data.Filename, "err", err)
 			w.WriteHeader(http.StatusInternalServerError)
 
-			return true
+			return
 		}
 
 		w.Header().Set("Location", "/")
 		w.WriteHeader(http.StatusFound)
 
-		return true
+		return
 	}
 
 	if err := backupListTmpl.ExecuteTemplate(w, "sqliterestorepage.tmpl", &data); err != nil {
 		slog.ErrorContext(ctx, "restoreBackupHandler failed to render", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 	}
-
-	return true
 }
 
 func (b *BackuperSqlite) getConnection(ctx context.Context) (*sql.Conn, error) {
@@ -424,14 +422,14 @@ func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user
 		"ORDER BY ts DESC LIMIT "+strconv.Itoa(b.numIncrBackups)+
 		")", user, file).Scan(&backupid)
 	if errors.Is(err, sql.ErrNoRows) {
-		slog.DebugContext(ctx, "delete incr backups - not found", "user", user, "file", file)
+		slog.DebugContext(ctx, "sqlitebackup: delete incr backups - not found")
 
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("clean incr backup for user %q file %q failed: %w", user, file, err)
 	}
 
-	slog.DebugContext(ctx, "delete incr backups", "min_id", backupid.Int64, "user", user, "file", file)
+	slog.DebugContext(ctx, "sqlitebackup: delete incr backups", "min_id", backupid.Int64)
 
 	res, err := tx.ExecContext(ctx, "DELETE FROM backups WHERE username=? AND filename=? AND isfull=0 and id<?",
 		user, file, backupid)
@@ -440,7 +438,7 @@ func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user
 	}
 
 	count, _ := res.RowsAffected()
-	slog.DebugContext(ctx, "delete incr backups", "deleted", count, "user", user, "file", file)
+	slog.DebugContext(ctx, "sqlitebackup: delete incr backups", "deleted", count)
 
 	return nil
 }
@@ -454,14 +452,14 @@ func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user
 		"ORDER BY ts DESC LIMIT "+strconv.Itoa(b.numIncrBackups)+
 		")", user, file).Scan(&backupid)
 	if errors.Is(err, sql.ErrNoRows) {
-		slog.DebugContext(ctx, "delete full backups - not found", "user", user, "file", file)
+		slog.DebugContext(ctx, "sqlitebackup: delete full backups - not found")
 
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("clean full backup for user %q file %q failed: %w", user, file, err)
 	}
 
-	slog.DebugContext(ctx, "delete full backups", "min_id", backupid.Int64, "user", user, "file", file)
+	slog.DebugContext(ctx, "sqlitebackup: delete full backups", "min_id", backupid.Int64)
 
 	res, err := tx.ExecContext(ctx,
 		"DELETE FROM backups as b WHERE username=? AND filename=? AND isfull=1 and id < ? "+
@@ -472,7 +470,7 @@ func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user
 	}
 
 	count, _ := res.RowsAffected()
-	slog.DebugContext(ctx, "delete full backups", "deleted", count, "user", user, "file", file)
+	slog.DebugContext(ctx, "sqlitebackup: delete full backups", "deleted", count)
 
 	return nil
 }
@@ -525,8 +523,10 @@ func (b *BackuperSqlite) loadPolicy(policy string) error { //nolint:cyclop
 		}
 	}
 
-	slog.Info(fmt.Sprintf("backup policy: %d full backups, %d incremental backups, %s between full backups",
-		b.numFullBackups, b.numIncrBackups, b.maxFullBackupAge))
+	slog.Info(
+		fmt.Sprintf("sqlitebackup: backup policy: %d full backups, %d incremental backups, %s between full backups",
+			b.numFullBackups, b.numIncrBackups, b.maxFullBackupAge),
+	)
 
 	return nil
 }
@@ -594,7 +594,7 @@ func (b *BackuperSqlite) storeContent(
 		compressed = 1
 	}
 
-	slog.DebugContext(ctx, "insert backup", "user", username, "file", file, "isfull", isfull,
+	slog.DebugContext(ctx, "sqlitebackup: insert backup", "isfull", isfull,
 		"compressed", compressed, "parent", parentID, "len", len(content))
 
 	_, err := tx.ExecContext(ctx, `
@@ -727,6 +727,7 @@ func listSqliteBackups(ctx context.Context, conn *sql.Conn, username string) ([]
 }
 
 // ------------------------------------------------------------------------------
+
 func RestoreSqliteBackup(
 	ctx context.Context,
 	dbfilename string,
@@ -756,7 +757,9 @@ func RestoreSqliteBackup(
 
 //------------------------------------------------------------------------------
 
-func getFileFromDb(ctx context.Context, conn *sql.Conn, backupid int64) (*SqliteBackup, error) { //nolint:cyclop
+func getFileFromDb(ctx context.Context, conn *sql.Conn, backupid int64) (*SqliteBackup, error) { //nolint:cyclop,funlen
+	slog.DebugContext(ctx, "sqlitebackup: load file from backup", "backupid", backupid)
+
 	var (
 		content, parentContent        []byte
 		compressed, isfull, timestamp int

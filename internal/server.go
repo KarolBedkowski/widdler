@@ -158,7 +158,7 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPat
 		return ErrNotFound
 	}
 
-	ctx := r.Context()
+	ctx := slogctx.Append(r.Context(), slog.String("file", fullPath))
 
 	_, err := u.root.Stat(fullPath)
 	switch {
