@@ -3,12 +3,13 @@
 # Karol Będkowski, 2025-03-25 18:28
 #
 .PHONY: build
-build: # empty.html.bz2
-	go build -o widdler-ex -ldflags "-s -w" .
+build: 
+	go build -o widdler-ex main.go
 
-#empty.html.bz2: empty.html
-#	bzip2 -9kf empty.html
 
+.PHONY: build_release
+build_release: 
+	go build -o widdler-ex -ldflags "-s -w" main.go
 
 .PHONY: check
 lint:
@@ -26,7 +27,7 @@ format:
 
 .PHONY: run
 run:
-	go run -tags gitint . \
+	go run -tags gitint main.go \
 		--log.level debug \
 		serve \
 		--wikis "`pwd`/wikis/" \
@@ -35,13 +36,21 @@ run:
 		--backup.policy 2,5,30s \
 		--backup.compress
 
+
 #-backup.mode git \
 #--auth basic \
 
 .PHONY: run-multi
 run-multi:
-	go run . -backup.keep_daily 2 -backup.keep_on_write 5 -wikis "`pwd`/wikis/" -log.level debug -backup.interval 5 -backup.mode git \
-		-htpass `pwd`/.htpasswd -auth basic
+	go run -tags gitint main.go \
+		--log.level debug \
+		serve \
+ 		--htpass `pwd`/.htpasswd --auth basic \
+		--wikis "`pwd`/wikis/" \
+		--backup.mode sqlite \
+		--backup.interval 5 \
+		--backup.policy 2,5,30s \
+		--backup.compress
 
 # vim:ft=make
 #
