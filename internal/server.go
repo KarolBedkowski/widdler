@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"maps"
 	"net"
@@ -166,71 +165,6 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPat
 	}
 
 	u.dav.ServeHTTP(w, r)
-
-	return nil
-}
-
-func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpath string) error {
-	rdfs, _ := u.root.FS().(fs.ReadDirFS)
-
-	entries, err := rdfs.ReadDir(reqpath)
-	switch {
-	case err != nil:
-		return fmt.Errorf("read dir %q error: %w", u.home, err)
-	case len(entries) == 0:
-		return ErrNotFound
-	}
-
-	if r.URL.Path == "/" {
-		// If we have entries, and are serving up /, check for
-		// index.html and redirect to that if it exists. We redirect
-		// because net/http handles index.html magically for FileServer
-		if _, err := os.Stat(path.Join(u.home, "index.html")); !os.IsNotExist(err) {
-			http.Redirect(w, r, "/index.html", http.StatusMovedPermanently)
-
-			return nil
-		}
-	}
-
-	files := make([]fs.DirEntry, 0, len(entries))
-	dirs := make([]fs.DirEntry, 0, len(entries))
-
-	for _, e := range entries {
-		if e.Name()[0] == '.' {
-			continue
-		}
-
-		if e.IsDir() {
-			dirs = append(dirs, e)
-		} else {
-			files = append(files, e)
-		}
-	}
-
-	parent := filepath.Dir(reqpath)
-	if reqpath == "." {
-		parent = ""
-		reqpath = ""
-	}
-
-	data := struct {
-		Files             []fs.DirEntry
-		Dirs              []fs.DirEntry
-		Parent            string
-		Path              string
-		SupportBackupsDir bool
-	}{
-		Files:             files,
-		Dirs:              dirs,
-		Parent:            parent,
-		Path:              reqpath,
-		SupportBackupsDir: u.b.supportBackupsPage,
-	}
-
-	if err := appTemplates.ExecuteTemplate(w, "list.tmpl", &data); err != nil {
-		return fmt.Errorf("execute template error: %w", err)
-	}
-	//	u.fs.ServeHTTP(w, r)
 
 	return nil
 }

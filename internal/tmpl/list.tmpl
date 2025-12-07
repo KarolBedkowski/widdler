@@ -28,8 +28,8 @@
 
 <table>
 	<tbody>
-{{ with .Parent }}
-	<tr><td><a href="{{ . }}">◀️ Go up...</a><br/></td></tr>
+{{ if ne .Path  "" }}
+	<tr><td><a href="{{ .Parent }}">◀️ Go up...</a><br/></td></tr>
 {{ end }}
 
 {{ range .Dirs }} 
@@ -50,6 +50,17 @@
 </table>
 
 </br>
+
+<hr/>
+
+<h2>New file</h2>
+<form method="POST">
+	<label>File name: </label>
+	<input type="text" name="filename" />
+	<button type="submit">Create</button>
+</form>
+
+
 
 </body>
 </html>
