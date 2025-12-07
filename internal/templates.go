@@ -29,7 +29,7 @@ func init() {
 
 var (
 	sizesName = []string{"B", "B", "kB", "MB", "GB"}
-	sizesDiv  = []int64{1, 1024, 1048576, 1073741824, 1099511627776}
+	sizesDiv  = []int64{0, 1024, 1048576, 1073741824, 1099511627776}
 )
 
 func formatSize(size int64) string {

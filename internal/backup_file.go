@@ -79,7 +79,7 @@ func (b *BackuperFile) Clean(ctx context.Context, users []string) error {
 	}
 
 	for _, ud := range usersDirs {
-		slog.DebugContext(ctx, "cleaning backup in "+ud)
+		slog.DebugContext(ctx, "filebackup: cleaning backup in "+ud)
 
 		if err := b.deleteOldBackups(ud); err != nil {
 			return fmt.Errorf("delete old backup %q error: %w", ud, err)
@@ -101,7 +101,7 @@ func (b *BackuperFile) backupFile(ctx context.Context, root *os.Root, path, dstF
 		return fmt.Errorf("stat backup destination %q error: %w", dstFilename, err)
 	}
 
-	slog.DebugContext(ctx, "backup file", "src", path, "dst", dstFilename)
+	slog.DebugContext(ctx, "filebackup: backup file", "src", path, "dst", dstFilename)
 
 	source, err := root.Open(path)
 	if err != nil {
@@ -148,7 +148,7 @@ func (b *BackuperFile) deleteOldBackups(directory string) error {
 		toDel := selectFilesToDel(files, time.Now(), b.keepOnWrite, b.keepDaily)
 		// delete
 		for _, fname := range toDel {
-			slog.Debug("delete old backup", "path", fname)
+			slog.Debug("filebackup: delete old backup", "path", fname)
 
 			if err := os.Remove(fname); err != nil {
 				return fmt.Errorf("remove %q error: %w", fname, err)
@@ -199,9 +199,7 @@ func selectFilesToDel(files []string, now time.Time, keepOnWrite, keepDaily int)
 			continue
 		}
 
-		dateFromFile := sp[1]
-
-		if dateFromFile == today {
+		if dateFromFile := sp[1]; dateFromFile == today {
 			if keepOnWrite > 0 {
 				toKeep = append(toKeep, file)
 				keepOnWrite--
@@ -268,7 +266,7 @@ func ensureBackupDirExists(ctx context.Context, root *os.Root, backupDir string)
 			return fmt.Errorf("create backup dir %q error: %w", backupDir, err)
 		}
 
-		slog.InfoContext(ctx, fmt.Sprintf("created backup dir %s in %s", backupDir, root.Name()))
+		slog.InfoContext(ctx, fmt.Sprintf("filebackup: created backup dir %s in %s", backupDir, root.Name()))
 	} else if err != nil {
 		return fmt.Errorf("stat backup dir %q error: %w", backupDir, err)
 	}
@@ -279,6 +277,6 @@ func ensureBackupDirExists(ctx context.Context, root *os.Root, backupDir string)
 // closeFile close obj and log error.
 func closeFile(ctx context.Context, obj io.Closer, path string) {
 	if err := obj.Close(); err != nil {
-		slog.ErrorContext(ctx, "close file error", "path", path, "err", err)
+		slog.ErrorContext(ctx, "filebackup: close file error", "path", path, "err", err)
 	}
 }

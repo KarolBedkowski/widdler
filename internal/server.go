@@ -60,7 +60,7 @@ func newUserHandler(user, pass, homedir, fullListen string, backuper *Backuper) 
 
 	root, err := os.OpenRoot(homedir)
 	if err != nil {
-		slog.Error("open home dir failed", "user", user, "homedir", homedir, "err", err)
+		slog.Error("server: open home dir failed", "user", user, "homedir", homedir, "err", err)
 		os.Exit(1)
 	}
 
@@ -75,7 +75,7 @@ func newUserHandler(user, pass, homedir, fullListen string, backuper *Backuper) 
 			FileSystem: webdav.Dir(homedir),
 			Logger: func(r *http.Request, err error) {
 				if err != nil {
-					slog.ErrorContext(r.Context(), "handle error", "req", r.URL, "err", err)
+					slog.ErrorContext(r.Context(), "server: handle error", "req", r.URL, "err", err)
 				}
 			},
 		},
@@ -104,13 +104,13 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.DebugContext(ctx, "resolved file", "fullPath", fullPath)
+	slog.DebugContext(ctx, "server: resolved file", "fullPath", fullPath)
 
 	// HTML files will be created or sent back
 	if err := u.handleHTML(w, r, fullPath); err == nil {
 		return
 	} else if !errors.Is(err, ErrNotFound) {
-		slog.ErrorContext(ctx, "handle html error", "path", fullPath, "err", err)
+		slog.ErrorContext(ctx, "server: handle html error", "path", fullPath, "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
 		return
@@ -120,14 +120,14 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := u.handleBrowse(w, r, fullPath); err == nil {
 		return
 	} else if !errors.Is(err, ErrNotFound) {
-		slog.ErrorContext(ctx, "handle browse error", "path", r.URL.Path, "err", err)
+		slog.ErrorContext(ctx, "server: handle browse error", "path", r.URL.Path, "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
 		return
 	}
 
 	if err := u.handleLanding(w); err != nil {
-		slog.ErrorContext(ctx, "handle landing error", "err", err)
+		slog.ErrorContext(ctx, "server: handle landing error", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -149,7 +149,7 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPat
 	switch {
 	case os.IsNotExist(err):
 		// file not exists, try create empty
-		slog.InfoContext(ctx, "creating empty wiki", "path", fullPath, "root", u.root)
+		slog.InfoContext(ctx, "server: creating empty wiki", "path", fullPath, "root", u.root)
 
 		if err := createEmpty(ctx, u.root, fullPath); err != nil {
 			return fmt.Errorf("create empty wiki error: %w", err)
@@ -254,7 +254,7 @@ func (u *userHandler) handleLanding(w http.ResponseWriter) error {
 func createEmpty(ctx context.Context, root *os.Root, path string) error {
 	const filePerm = 0o600
 
-	slog.InfoContext(ctx, "downloading "+emptyURL)
+	slog.InfoContext(ctx, "server: downloading", "url", emptyURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, emptyURL, http.NoBody)
 	if err != nil {
@@ -278,7 +278,7 @@ func createEmpty(ctx context.Context, root *os.Root, path string) error {
 		return fmt.Errorf("write error: %w", err)
 	}
 
-	slog.InfoContext(ctx, "create empty wiki completed")
+	slog.InfoContext(ctx, "server: create empty wiki completed")
 
 	return nil
 }
@@ -376,8 +376,7 @@ func (m *MultiUserHandler) loadUsers(davDir, passPath, fullListen string, backup
 func ensureHomeExists(home string) error {
 	const homeDirPerm = 0o700
 
-	_, err := os.Stat(home)
-	switch {
+	switch _, err := os.Stat(home); {
 	case err == nil:
 	case os.IsNotExist(err):
 		if err := os.Mkdir(home, homeDirPerm); err != nil {
@@ -452,7 +451,7 @@ func (c *Server) Start(ctx context.Context, backuper *Backuper) error {
 	} else {
 		m := &MultiUserHandler{auth: c.auth} //nolint:exhaustruct
 		if err := m.loadUsers(c.davDir, c.passPath, c.fullListen, backuper); err != nil {
-			slog.Error("load users error:", "err", err)
+			slog.Error("server: load users error:", "err", err)
 			os.Exit(1)
 		}
 
@@ -479,7 +478,7 @@ func (c *Server) Start(ctx context.Context, backuper *Backuper) error {
 
 	backuper.start(ctx, users)
 
-	slog.Info("Listening on '" + c.fullListen + "'")
+	slog.Info("server: listening on '" + c.fullListen + "'")
 
 	if c.tlsCert == "" || c.tlsKey == "" {
 		if err := srv.Serve(lis); err != nil {

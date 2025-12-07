@@ -44,9 +44,6 @@ type Backuper struct {
 }
 
 func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
-	backupDir := cmd.String("backup.dir")
-	davDir := cmd.String("wikis")
-
 	backuper := Backuper{ //nolint:exhaustruct
 		interval:   cmd.Int("backup.interval"),
 		enabled:    true,
@@ -56,6 +53,9 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 
 	switch backuper.mode {
 	case backupModeFile:
+		backupDir := cmd.String("backup.dir")
+		davDir := cmd.String("wikis")
+
 		b, err := newBackuperFile(davDir, backupDir, cmd.String("backup.policy"),
 			cmd.Bool("backup.compress"))
 		if err != nil {
@@ -74,7 +74,7 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 		backuper.handler = &b
 
 	case "":
-		slog.Info("Backups disabled")
+		slog.Info("backups: backups disabled")
 
 		backuper.enabled = false
 
@@ -85,7 +85,7 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 		return backuper, fmt.Errorf("unknown backup mode %q", backuper.mode) //nolint:err113
 	}
 
-	slog.Info("backup enabled", "backup_mode", backuper.mode)
+	slog.Info("backups: backup enabled", "backup_mode", backuper.mode)
 
 	if _, ok := backuper.handler.(backupListHandler); ok {
 		backuper.supportBackupsPage = true
@@ -130,10 +130,8 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 
 func (b *Backuper) needBackup(srcFilePath string) bool {
 	if oldBackupTs, ok := b.backupsAge[srcFilePath]; ok {
-		now := time.Now()
-
 		// new day, always create backup
-		if oldBackupTs.YearDay() != now.YearDay() || now.Year() != oldBackupTs.Year() {
+		if now := time.Now(); oldBackupTs.YearDay() != now.YearDay() || now.Year() != oldBackupTs.Year() {
 			return true
 		}
 
@@ -148,7 +146,7 @@ func (b *Backuper) needBackup(srcFilePath string) bool {
 }
 
 func (b *Backuper) cleanWorker(ctx context.Context, users []string) {
-	slog.DebugContext(ctx, "clean old backups worker started", "users", users)
+	slog.DebugContext(ctx, "backups: clean old backups worker started", "users", users)
 
 	c := time.Tick(cleanTaskInterval * time.Second)
 
@@ -158,7 +156,7 @@ func (b *Backuper) cleanWorker(ctx context.Context, users []string) {
 
 	for {
 		if err := b.handler.Clean(ctx, users); err != nil {
-			slog.ErrorContext(ctx, "clean old backups failed", "err", err)
+			slog.ErrorContext(ctx, "backups: clean old backups failed", "err", err)
 		}
 
 		<-c
@@ -176,8 +174,7 @@ func (b *Backuper) handleBackupsPage(
 		return false
 	}
 
-	bh, ok := b.handler.(backupListHandler)
-	if ok {
+	if bh, ok := b.handler.(backupListHandler); ok {
 		return bh.ListHandler(ctx, w, r, root, user)
 	}
 
