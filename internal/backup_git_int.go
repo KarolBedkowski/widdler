@@ -1,6 +1,6 @@
 //go:build gitint
 
-package main
+package internal
 
 //
 // backup_got_ext.go

@@ -1,4 +1,4 @@
-package main
+package internal
 
 //
 // backup_file.go

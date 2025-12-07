@@ -1,4 +1,4 @@
-package main
+package internal
 
 //
 // backup_sqlite.go
@@ -827,3 +827,4 @@ func getFileFromDb(ctx context.Context, conn *sql.Conn, backupid int64) (*Sqlite
 	backup.Data = []byte(result)
 
 	return &backup, nil
+}

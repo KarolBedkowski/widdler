@@ -1,4 +1,4 @@
-package main
+package internal
 
 //
 // backup.go
@@ -166,7 +166,13 @@ func (b *Backuper) cleanWorker(ctx context.Context, users []string) {
 	}
 }
 
-func (b *Backuper) handleBackupsPage(ctx context.Context, w http.ResponseWriter, r *http.Request, root *os.Root, user string) bool {
+func (b *Backuper) handleBackupsPage(
+	ctx context.Context,
+	w http.ResponseWriter,
+	r *http.Request,
+	root *os.Root,
+	user string,
+) bool {
 	if !b.enabled {
 		return false
 	}
