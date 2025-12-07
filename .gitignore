@@ -9,5 +9,6 @@ result
 tags
 wikis
 *.sqlite
+*.sqlite-*
 *.html
 /tmp/
