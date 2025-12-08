@@ -1,28 +1,28 @@
-{% func SqlteBackupsIndex(data *backupSqliteIndexData) %}
+{% code
+type SqlteBackupsIndexPage struct {
+	Backups []SqliteBackup
+	Prefix  string
+}
+%}
 
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" type="image/png" href="data:image/png;base64,">
-<style>
-{% cat "main.css" %}
-</style>
-</head>
-<body>
+{% func (p *SqlteBackupsIndexPage) Title() %} - Backups{% endfunc %}
 
-<h1>Widdler-ex</h1>
+{% func (p *SqlteBackupsIndexPage) Body() %}
 <h2>Backups</h2>
 
-<table><thead><tr><th>File</th><th>Date</th><th>Action</th></tr></th><tbody>
-	{% for _, i := range data.Backups %}
+<table>
+<thead>
+	<tr><th>File</th><th>Date</th><th>Action</th></tr></th>
+</thead>
+<tbody>
+	{% for _, i := range p.Backups %}
 	<tr>
-		<td><a href="{%s data.Prefix %}/{%d int(i.ID) %}/view">{%s i.Filename %}</a></td>
+		<td><a href="{%s p.Prefix %}/{%d int(i.ID) %}/view">{%s i.Filename %}</a></td>
 		<td>{%s formatDate(i.Timestamp) %}</td>
-		<td><a href="{%s data.Prefix %}/{%d int(i.ID) %}/restore">Restore</a></td>
+		<td><a href="{%s p.Prefix %}/{%d int(i.ID) %}/restore">Restore</a></td>
 	{% endfor %}
-</tbody></table>
+</tbody>
+</table>
 
 </body>
 </html>

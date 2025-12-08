@@ -29,7 +29,9 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpa
 
 	w.Header().Add("Cache-Control", "no-cache")
 
-	WriteServerBrowserIndex(w, &content)
+	WritePageTemplate(w, &ServerBrowserIndexPage{
+		data: &content,
+	})
 
 	return nil
 }

@@ -1,24 +1,18 @@
-{% func SqlteBackupsRestore(filename string) %}
+{% code
+type SqlteBackupsRestorePage struct {
+	filename string
+}
+%}
 
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" type="image/png" href="data:image/png;base64,">
-<style>
-{% cat "main.css" %}
-</style>
-</head>
-<body>
+{% func (p *SqlteBackupsRestorePage) Title() %} - Backup restore{% endfunc %}
 
-<h1>Widdler-ex</h1>
+{% func (p *SqlteBackupsRestorePage) Body() %}
 <h2>Backup</h2>
-<h3>Restore file {%s filename %}</h3>
+<h3>Restore file {%s p.filename %}</h3>
 
 <form method="POST">
 	<label>Target filename: </label>
-	<input type="text" name="filename" value="{%s filename %}" />
+	<input type="text" name="filename" value="{%s p.filename %}" />
 	<button type="submit">Restore</button>
 </form>
 

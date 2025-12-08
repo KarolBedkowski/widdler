@@ -254,20 +254,10 @@ func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.Response
 		return
 	}
 
-	data := backupSqliteIndexData{
-		backups,
-		prefix,
-	}
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Add("Cache-Control", "no-cache")
 
-	WriteSqlteBackupsIndex(w, &data)
-}
-
-type backupSqliteIndexData struct {
-	Backups []SqliteBackup
-	Prefix  string
+	WritePageTemplate(w, &SqlteBackupsIndexPage{backups, prefix})
 }
 
 func (b *BackuperSqlite) viewBackupHandler(ctx context.Context, w http.ResponseWriter, user string, backupid int64,
@@ -345,7 +335,7 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 		return
 	}
 
-	WriteSqlteBackupsRestore(w, data.Filename)
+	WritePageTemplate(w, &SqlteBackupsRestorePage{data.Filename})
 }
 
 func (b *BackuperSqlite) getConnection(ctx context.Context) (*sql.Conn, error) {
