@@ -95,7 +95,9 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 }
 
 func (b *Backuper) start(ctx context.Context, users []string) {
-	go b.cleanWorker(ctx, users)
+	if b.enabled {
+		go b.cleanWorker(ctx, users)
+	}
 }
 
 func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath string) error {

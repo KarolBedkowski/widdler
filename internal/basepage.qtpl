@@ -1,0 +1,37 @@
+
+{% interface
+Page {
+	Title()
+	Body()
+}
+%}
+
+{% func PageTemplate(p Page) %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="data:image/png;base64,">
+<style>
+{% cat "main.css" %}
+</style>
+<title>Widdler-ex {%= p.Title() %}</title>
+</head>
+<body>
+<html>
+<body>
+	<h1><a href="/">Widdler-ex</a></h1>
+	{%= p.Body() %}
+</body>
+</html>
+{% endfunc %}
+
+
+{% code type BasePage struct {} %}
+{% func (p *BasePage) Title() %}{% endfunc %}
+{% func (p *BasePage) Body() %}body{% endfunc %}
+
+
+
+# vim:ft=mako:

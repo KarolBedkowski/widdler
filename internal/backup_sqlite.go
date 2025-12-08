@@ -254,20 +254,10 @@ func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.Response
 		return
 	}
 
-	data := struct {
-		Backups []SqliteBackup
-		Prefix  string
-	}{
-		backups,
-		prefix,
-	}
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Add("Cache-Control", "no-cache")
 
-	if err := appTemplates.ExecuteTemplate(w, "sqliteindexpage.tmpl", &data); err != nil {
-		slog.ErrorContext(ctx, "sqlitebackup: failed to render index", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
-	}
+	WritePageTemplate(w, &SqlteBackupsIndexPage{backups, prefix})
 }
 
 func (b *BackuperSqlite) viewBackupHandler(ctx context.Context, w http.ResponseWriter, user string, backupid int64,
@@ -345,10 +335,7 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 		return
 	}
 
-	if err := appTemplates.ExecuteTemplate(w, "sqliterestorepage.tmpl", &data); err != nil {
-		slog.ErrorContext(ctx, "restoreBackupHandler failed to render", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
-	}
+	WritePageTemplate(w, &SqlteBackupsRestorePage{data.Filename})
 }
 
 func (b *BackuperSqlite) getConnection(ctx context.Context) (*sql.Conn, error) {

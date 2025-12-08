@@ -1,0 +1,63 @@
+
+{% code
+type ServerBrowserIndexPage struct {
+	data *DirContent
+}
+%}
+
+{% func (p *ServerBrowserIndexPage) Title() %}
+{% endfunc %}
+
+{% func (p *ServerBrowserIndexPage) Body() %}
+
+<table>
+	<tbody>
+{% if p.data.Path != "" %}
+	<tr><td><a href="{%s p.data.Parent %}">◀️ Go up...</a><br/></td></tr>
+{% endif %}
+
+{% for _, d := range p.data.Dirs %} 
+	<tr>
+		<td><a href="{%s p.data.Path %}/{%s d.Name() %}">📁 {%s d.Name() %}</a></td>
+		<td>{%s formatDate(must(d.Info()).ModTime()) %}</td>
+	</tr>
+{% endfor %}
+
+{% for _, f := range p.data.Files %} 
+	<tr>
+		<td><a href="{%s p.data.Path %}/{%s f.Name() %}">📄 {%s f.Name() %}</a></td>
+		{% code info := must(f.Info()) %}
+		<td>{%s formatDate(info.ModTime()) %}</td>
+		<td>{%s formatSize(info.Size()) %}</td>
+	</tr>
+{% endfor %}
+	</tbody>
+</table>
+
+</br>
+
+<hr/>
+
+<h2>New file</h2>
+<form method="POST">
+	<label>File name: </label>
+	<input type="text" name="filename" />
+	<button type="submit">Create</button>
+</form>
+
+
+{% if p.data.SupportBackupsDir %} 
+
+<hr/>
+
+<a href="/_backups">Backups</a>
+
+{% endif %}
+
+
+</body>
+</html>
+
+{% endfunc %}
+
+# vim:ft=mako:

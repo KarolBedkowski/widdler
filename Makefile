@@ -4,11 +4,13 @@
 #
 .PHONY: build
 build: 
+	go generate
 	go build -o widdler-ex main.go
 
 
 .PHONY: build_release
 build_release: 
+	go generate
 	go build -o widdler-ex -ldflags "-s -w" main.go
 
 .PHONY: check
@@ -27,6 +29,7 @@ format:
 
 .PHONY: run
 run:
+	go generate
 	go run -tags gitint main.go \
 		--log.level debug \
 		serve \
@@ -42,6 +45,7 @@ run:
 
 .PHONY: run-multi
 run-multi:
+	go generate
 	go run -tags gitint main.go \
 		--log.level debug \
 		serve \
@@ -51,6 +55,10 @@ run-multi:
 		--backup.interval 5 \
 		--backup.policy 2,5,30s \
 		--backup.compress
+
+.PHONY: clean
+clean:
+	find . -type f -name '*.qtpl.go' -delete
 
 # vim:ft=make
 #

@@ -13,8 +13,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"os"
-	"path"
 	"path/filepath"
 	"strings"
 )
@@ -25,28 +23,15 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpa
 	}
 
 	content, err := u.getDirContent(r.Context(), reqpath)
-
-	switch {
-	case err != nil:
+	if err != nil {
 		return fmt.Errorf("read dir %q error: %w", u.home, err)
-	case len(content.Files) == 0 && len(content.Dirs) == 0:
-		return ErrNotFound
 	}
 
-	if r.URL.Path == "/" {
-		// If we have entries, and are serving up /, check for
-		// index.html and redirect to that if it exists. We redirect
-		// because net/http handles index.html magically for FileServer
-		if _, err := os.Stat(path.Join(u.home, "index.html")); !os.IsNotExist(err) {
-			http.Redirect(w, r, "/index.html", http.StatusMovedPermanently)
+	w.Header().Add("Cache-Control", "no-cache")
 
-			return nil
-		}
-	}
-
-	if err := appTemplates.ExecuteTemplate(w, "list.tmpl", &content); err != nil {
-		return fmt.Errorf("execute template error: %w", err)
-	}
+	WritePageTemplate(w, &ServerBrowserIndexPage{
+		data: &content,
+	})
 
 	return nil
 }
@@ -71,7 +56,7 @@ func (u *userHandler) handleNewFile(w http.ResponseWriter, r *http.Request, reqp
 	return nil
 }
 
-func (u *userHandler) getDirContent(ctx context.Context, reqpath string) (dirContent, error) {
+func (u *userHandler) getDirContent(ctx context.Context, reqpath string) (DirContent, error) {
 	_ = ctx
 
 	rdfs, _ := u.root.FS().(fs.ReadDirFS)
@@ -79,9 +64,9 @@ func (u *userHandler) getDirContent(ctx context.Context, reqpath string) (dirCon
 	entries, err := rdfs.ReadDir(reqpath)
 	switch {
 	case err != nil:
-		return dirContent{}, fmt.Errorf("read dir %q error: %w", u.home, err)
+		return DirContent{}, fmt.Errorf("read dir %q error: %w", u.home, err)
 	case len(entries) == 0:
-		return dirContent{}, ErrNotFound
+		return DirContent{}, ErrNotFound
 	}
 
 	files := make([]fs.DirEntry, 0, len(entries))
@@ -108,7 +93,7 @@ func (u *userHandler) getDirContent(ctx context.Context, reqpath string) (dirCon
 		parent = filepath.Dir(reqpath)
 	}
 
-	return dirContent{
+	return DirContent{
 		Files:             files,
 		Dirs:              dirs,
 		Parent:            parent,
@@ -117,7 +102,7 @@ func (u *userHandler) getDirContent(ctx context.Context, reqpath string) (dirCon
 	}, nil
 }
 
-type dirContent struct {
+type DirContent struct {
 	Files             []fs.DirEntry
 	Dirs              []fs.DirEntry
 	Parent            string
