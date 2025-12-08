@@ -10,10 +10,12 @@ type ServerBrowserIndexPage struct {
 
 {% func (p *ServerBrowserIndexPage) Body() %}
 
+<h2>Files</h2>
 
 {% if len(p.data.Dirs) == 0 && len(p.data.Files) == 0 %}
 <p><en>No files found; pleace create new.</em></p>
 {% else %}
+
 {%= p.renderTable() %}
 {% endif %}
 
@@ -37,14 +39,14 @@ type ServerBrowserIndexPage struct {
 {% endif %}
 
 
-</body>
-</html>
-
 {% endfunc %}
 
 {% func (p *ServerBrowserIndexPage) renderTable() %}
 
 <table>
+	<thead>
+		<tr><th>Name</th><th>Date</th><th>Size</th></tr>
+	</thead>
 	<tbody>
 {% if p.data.Path != "" %}
 	<tr><td><a href="{%s p.data.Parent %}">◀️ Go up...</a><br/></td></tr>

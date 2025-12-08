@@ -19,10 +19,13 @@ Page {
 <title>Widdler-ex {%= p.Title() %}</title>
 </head>
 <body>
-<html>
-<body>
+	<header>
 	<h1><a href="/">Widdler-ex</a></h1>
+	<p>A <a href="https://tiddlywiki.com">TiddlyWiki</a> server.</p>
+	</header>
+	<content>
 	{%= p.Body() %}
+	</content>
 </body>
 </html>
 {% endfunc %}
