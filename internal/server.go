@@ -287,9 +287,11 @@ func (m *MultiUserHandler) loadUsers(davDir, passPath, fullListen string, backup
 func ensureHomeExists(home string) error {
 	const homeDirPerm = 0o700
 
-	switch _, err := os.Stat(home); {
+	switch s, err := os.Stat(home); {
 	case err == nil:
-	case os.IsNotExist(err):
+	case s == nil || os.IsNotExist(err):
+		slog.Info("creating home dir", "home", home)
+
 		if err := os.Mkdir(home, homeDirPerm); err != nil {
 			return fmt.Errorf("make home dir %q error: %w", home, err)
 		}
