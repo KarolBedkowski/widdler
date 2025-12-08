@@ -10,6 +10,40 @@ type ServerBrowserIndexPage struct {
 
 {% func (p *ServerBrowserIndexPage) Body() %}
 
+
+{% if len(p.data.Dirs) == 0 && len(p.data.Files) == 0 %}
+<p><en>No files found; pleace create new.</em></p>
+{% else %}
+{%= p.renderTable() %}
+{% endif %}
+
+
+<hr/>
+
+<h3>Create new, empty wiki</h3>
+<form method="POST">
+	<label>File name: </label>
+	<input type="text" name="filename" />
+	<button type="submit">Create</button>
+</form>
+
+<hr/>
+
+{% if p.data.SupportBackupsDir %} 
+
+<h3>Backups</h3>
+<a href="/_backups">Browse backuped files</a>
+
+{% endif %}
+
+
+</body>
+</html>
+
+{% endfunc %}
+
+{% func (p *ServerBrowserIndexPage) renderTable() %}
+
 <table>
 	<tbody>
 {% if p.data.Path != "" %}
@@ -33,30 +67,6 @@ type ServerBrowserIndexPage struct {
 {% endfor %}
 	</tbody>
 </table>
-
-</br>
-
-<hr/>
-
-<h2>New file</h2>
-<form method="POST">
-	<label>File name: </label>
-	<input type="text" name="filename" />
-	<button type="submit">Create</button>
-</form>
-
-
-{% if p.data.SupportBackupsDir %} 
-
-<hr/>
-
-<a href="/_backups">Backups</a>
-
-{% endif %}
-
-
-</body>
-</html>
 
 {% endfunc %}
 
