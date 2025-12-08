@@ -13,8 +13,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"os"
-	"path"
 	"path/filepath"
 	"strings"
 )
@@ -25,24 +23,11 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpa
 	}
 
 	content, err := u.getDirContent(r.Context(), reqpath)
-
-	switch {
-	case err != nil:
+	if err != nil {
 		return fmt.Errorf("read dir %q error: %w", u.home, err)
-	case len(content.Files) == 0 && len(content.Dirs) == 0:
-		return ErrNotFound
 	}
 
-	if r.URL.Path == "/" {
-		// If we have entries, and are serving up /, check for
-		// index.html and redirect to that if it exists. We redirect
-		// because net/http handles index.html magically for FileServer
-		if _, err := os.Stat(path.Join(u.home, "index.html")); !os.IsNotExist(err) {
-			http.Redirect(w, r, "/index.html", http.StatusMovedPermanently)
-
-			return nil
-		}
-	}
+	w.Header().Add("Cache-Control", "no-cache")
 
 	if err := appTemplates.ExecuteTemplate(w, "list.tmpl", &content); err != nil {
 		return fmt.Errorf("execute template error: %w", err)

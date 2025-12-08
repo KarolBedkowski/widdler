@@ -263,6 +263,7 @@ func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.Response
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Add("Cache-Control", "no-cache")
 
 	if err := appTemplates.ExecuteTemplate(w, "sqliteindexpage.tmpl", &data); err != nil {
 		slog.ErrorContext(ctx, "sqlitebackup: failed to render index", "err", err)

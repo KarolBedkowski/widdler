@@ -116,17 +116,8 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Everything else is browsable
-	if err := u.handleBrowse(w, r, fullPath); err == nil {
-		return
-	} else if !errors.Is(err, ErrNotFound) {
+	if err := u.handleBrowse(w, r, fullPath); err != nil {
 		slog.ErrorContext(ctx, "server: handle browse error", "path", r.URL.Path, "err", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-
-		return
-	}
-
-	if err := u.handleLanding(w); err != nil {
-		slog.ErrorContext(ctx, "server: handle landing error", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -165,20 +156,6 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPat
 	}
 
 	u.dav.ServeHTTP(w, r)
-
-	return nil
-}
-
-func (u *userHandler) handleLanding(w http.ResponseWriter) error {
-	// Landing will be used to fill our landing template
-	l := struct {
-		User string
-		URL  string
-	}{u.user, u.fullListen + "/wiki.html"}
-
-	if err := appTemplates.ExecuteTemplate(w, "landingpage.tmpl", l); err != nil {
-		return fmt.Errorf("execute template error: %w", err)
-	}
 
 	return nil
 }
