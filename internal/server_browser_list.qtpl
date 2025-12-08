@@ -1,0 +1,61 @@
+{% func ServerBrowserIndex(data *DirContent) %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="data:image/png;base64,">
+<style>
+{% cat "main.css" %}
+</style>
+
+</head>
+<body>
+
+<h1>Widdler-ex <small>{%s data.Path %}</small></h1>
+{% if data.SupportBackupsDir %} <a href="/_backups">Backups</a>{% endif %}
+<hr/>
+
+<table>
+	<tbody>
+{% if data.Path != "" %}
+	<tr><td><a href="{%s data.Parent %}">◀️ Go up...</a><br/></td></tr>
+{% endif %}
+
+{% for _, d := range data.Dirs %} 
+	<tr>
+		<td><a href="{%s data.Path %}/{%s d.Name() %}">📁 {%s d.Name() %}</a></td>
+		<td>{%s formatDate(must(d.Info()).ModTime()) %}</td>
+	</tr>
+{% endfor %}
+
+{% for _, f := range data.Files %} 
+	<tr>
+		<td><a href="{%s data.Path %}/{%s f.Name() %}">📄 {%s f.Name() %}</a></td>
+		{% code info := must(f.Info()) %}
+		<td>{%s formatDate(info.ModTime()) %}</td>
+		<td>{%s formatSize(info.Size()) %}</td>
+	</tr>
+{% endfor %}
+	</tbody>
+</table>
+
+</br>
+
+<hr/>
+
+<h2>New file</h2>
+<form method="POST">
+	<label>File name: </label>
+	<input type="text" name="filename" />
+	<button type="submit">Create</button>
+</form>
+
+
+
+</body>
+</html>
+
+{% endfunc %}
+
+# vim:ft=mako:

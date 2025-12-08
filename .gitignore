@@ -12,3 +12,4 @@ wikis
 *.sqlite-*
 *.html
 /tmp/
+*.qtpl.go

@@ -1,0 +1,33 @@
+{% func SqlteBackupsIndex(data *backupSqliteIndexData) %}
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="data:image/png;base64,">
+<style>
+{% cat "main.css" %}
+</style>
+</head>
+<body>
+
+<h1>Widdler-ex</h1>
+<h2>Backups</h2>
+
+<table><thead><tr><th>File</th><th>Date</th><th>Action</th></tr></th><tbody>
+	{% for _, i := range data.Backups %}
+	<tr>
+		<td><a href="{%s data.Prefix %}/{%d int(i.ID) %}/view">{%s i.Filename %}</a></td>
+		<td>{%s formatDate(i.Timestamp) %}</td>
+		<td><a href="{%s data.Prefix %}/{%d int(i.ID) %}/restore">Restore</a></td>
+	{% endfor %}
+</tbody></table>
+
+</body>
+</html>
+
+{% endfunc %}
+
+
+# vim:ft=mako:
