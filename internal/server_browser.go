@@ -62,11 +62,8 @@ func (u *userHandler) getDirContent(ctx context.Context, reqpath string) (DirCon
 	rdfs, _ := u.root.FS().(fs.ReadDirFS)
 
 	entries, err := rdfs.ReadDir(reqpath)
-	switch {
-	case err != nil:
-		return DirContent{}, fmt.Errorf("read dir %q error: %w", u.home, err)
-	case len(entries) == 0:
-		return DirContent{}, ErrNotFound
+	if err != nil {
+		return DirContent{}, fmt.Errorf("read dir %q error: %w", u.home, err, "reqpath", reqpath)
 	}
 
 	files := make([]fs.DirEntry, 0, len(entries))
