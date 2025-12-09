@@ -2,6 +2,8 @@ package internal
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -39,4 +41,24 @@ func must[T any](v T, err error) T {
 	}
 
 	return v
+}
+
+func isValidFilename(name string) bool {
+	if name == "" || name[0] == '.' {
+		return false
+	}
+
+	if strings.ContainsAny(name, `/\:><"|?*`) {
+		return false
+	}
+
+	if slices.Contains([]string{
+		"CON", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+		"PRN", "AUX", "NUL",
+	}, name) {
+		return false
+	}
+
+	return true
 }

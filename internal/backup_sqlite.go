@@ -322,6 +322,15 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 	fname := r.FormValue("filename")
 
 	if r.Method == http.MethodPost && fname != "" {
+		if !isValidFilename(fname) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("Invalid filename"))
+
+			return
+		}
+
+		slog.InfoContext(ctx, "restore backup file", "filename", fname, "backupid", backupid)
+
 		if err := root.WriteFile(fname, data.Data, 0o660); err != nil { //nolint:mnd
 			slog.ErrorContext(ctx, "write file error", "backup.filename", data.Filename, "err", err)
 			w.WriteHeader(http.StatusInternalServerError)

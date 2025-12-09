@@ -38,13 +38,17 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpa
 
 func (u *userHandler) handleNewFile(w http.ResponseWriter, r *http.Request, reqpath string) error {
 	filename := r.FormValue("filename")
-	if filename == "" {
+	filename = filepath.Base(filepath.Clean(filename))
+
+	if !isValidFilename(filename) {
 		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("Invalid filename"))
+
+		slog.DebugContext(r.Context(), "invalid filename", "filename", filename)
 
 		return nil
 	}
 
-	filename = filepath.Base(filename)
 	if !strings.HasSuffix(filename, ".html") && !strings.HasSuffix(filename, ".htm") {
 		filename += ".html"
 	}
