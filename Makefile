@@ -3,8 +3,7 @@
 # Karol Będkowski, 2025-03-25 18:28
 #
 .PHONY: build
-build: 
-	go generate
+build: generate
 	go build -o widdler-ex main.go
 
 
@@ -28,8 +27,7 @@ format:
 	golangci-lint fmt
 
 .PHONY: run
-run:
-	go generate
+run: generate
 	go run -tags gitint main.go \
 		--log.level debug \
 		serve \
@@ -44,8 +42,7 @@ run:
 #--auth basic \
 
 .PHONY: run-multi
-run-multi:
-	go generate
+run-multi: generate
 	go run -tags gitint main.go \
 		--log.level debug \
 		serve \
@@ -59,6 +56,25 @@ run-multi:
 .PHONY: clean
 clean:
 	find . -type f -name '*.qtpl.go' -delete
+
+
+QTPLS := $(shell find . -type f -name '*.qtpl')
+QTPLSC := $(QTPLS:%=%.go)
+
+generate: $(QTPLSC)
+
+%.qtpl.go: %.qtpl
+	qtc -file $<
+
+.PHONY: clean
+prepare:
+	go install github.com/valyala/quicktemplate/qtc
+	go mod tidy
+
+.PHONY: update-deps
+update-deps:
+	go get -u ./...
+	go mod tidy
 
 # vim:ft=make
 #
