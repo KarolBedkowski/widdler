@@ -72,9 +72,14 @@ prepare:
 	go mod tidy
 
 .PHONY: update-deps
-update-deps:
+update-deps: clean
 	go get -u ./...
 	go mod tidy
+	$(MAKE) build
+
+.PHONY: test
+test:
+	go test ./...
 
 # vim:ft=make
 #

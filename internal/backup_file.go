@@ -34,8 +34,8 @@ type BackuperFile struct {
 
 var _ BackupHandler = &BackuperFile{} //nolint:exhaustruct
 
-func newBackuperFile(basedir, backupdir, policy string, compress bool) (BackuperFile, error) {
-	backuper := BackuperFile{
+func newBackuperFile(basedir, backupdir, policy string, compress bool) (*BackuperFile, error) {
+	backuper := &BackuperFile{
 		baseDir:     basedir,
 		backupDir:   backupdir,
 		compress:    compress,
@@ -45,7 +45,7 @@ func newBackuperFile(basedir, backupdir, policy string, compress bool) (Backuper
 
 	if policy != "" {
 		if err := backuper.loadPolicy(policy); err != nil {
-			return backuper, err
+			return nil, err
 		}
 	}
 
@@ -69,16 +69,8 @@ func (b *BackuperFile) Create(ctx context.Context, root *os.Root, user, srcFileP
 }
 
 func (b *BackuperFile) Clean(ctx context.Context, users []string) error {
-	usersDirs := make([]string, 0, len(users))
-	if len(users) == 0 {
-		usersDirs = append(usersDirs, path.Join(b.baseDir, b.backupDir))
-	} else {
-		for _, u := range users {
-			usersDirs = append(usersDirs, path.Join(b.baseDir, u, b.backupDir))
-		}
-	}
-
-	for _, ud := range usersDirs {
+	for _, u := range users {
+		ud := path.Join(b.baseDir, u, b.backupDir)
 		slog.DebugContext(ctx, "filebackup: cleaning backup in "+ud)
 
 		if err := b.deleteOldBackups(ud); err != nil {

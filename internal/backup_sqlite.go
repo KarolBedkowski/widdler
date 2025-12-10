@@ -42,10 +42,10 @@ type BackuperSqlite struct {
 
 var _ BackupHandler = &BackuperSqlite{} //nolint:exhaustruct
 
-func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress bool) (BackuperSqlite, error) {
+func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress bool) (*BackuperSqlite, error) {
 	db, err := sql.Open("sqlite", dbfilename)
 	if err != nil {
-		return BackuperSqlite{}, fmt.Errorf("open database file failed: %w", err)
+		return nil, fmt.Errorf("open database file failed: %w", err)
 	}
 
 	db.SetConnMaxLifetime(60) //nolint:mnd
@@ -58,10 +58,10 @@ func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress 
 			content BLOB);
 		CREATE INDEX IF NOT EXISTS backups_idx ON backups (username, filename, isfull, ts);`)
 	if err != nil {
-		return BackuperSqlite{}, fmt.Errorf("init database failed: %w", err)
+		return nil, fmt.Errorf("init database failed: %w", err)
 	}
 
-	backuper := BackuperSqlite{
+	backuper := &BackuperSqlite{
 		db:               db,
 		numFullBackups:   7, //nolint:mnd
 		numIncrBackups:   7, //nolint:mnd
@@ -70,7 +70,7 @@ func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress 
 	}
 	if policy != "" {
 		if err := backuper.loadPolicy(policy); err != nil {
-			return BackuperSqlite{}, err
+			return nil, err
 		}
 	}
 
