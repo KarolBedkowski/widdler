@@ -1,4 +1,5 @@
 widdler
+widdler-ex
 .htpasswd
 dist/
 .idea
@@ -7,3 +8,8 @@ dist/
 result
 tags
 wikis
+*.sqlite
+*.sqlite-*
+*.html
+/tmp/
+*.qtpl.go

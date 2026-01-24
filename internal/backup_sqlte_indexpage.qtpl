@@ -1,0 +1,33 @@
+{% code
+type SqlteBackupsIndexPage struct {
+	Backups []SqliteBackup
+	Prefix  string
+}
+%}
+
+{% func (p *SqlteBackupsIndexPage) Title() %} - Backups{% endfunc %}
+
+{% func (p *SqlteBackupsIndexPage) Body() %}
+<h2>Backups</h2>
+
+<table>
+<thead>
+	<tr><th>File</th><th>Date</th><th>Action</th></tr></th>
+</thead>
+<tbody>
+	{% for _, i := range p.Backups %}
+	<tr>
+		<td><a href="{%s p.Prefix %}/{%d int(i.ID) %}/view">{%s i.Filename %}</a></td>
+		<td>{%s formatDate(i.Timestamp) %}</td>
+		<td><a href="{%s p.Prefix %}/{%d int(i.ID) %}/restore">Restore</a></td>
+	{% endfor %}
+</tbody>
+</table>
+
+</body>
+</html>
+
+{% endfunc %}
+
+
+# vim:ft=mako:

@@ -1,0 +1,97 @@
+version: "2"
+run:
+  build-tags:
+    - gitint
+linters:
+  default: all
+  disable:
+    - depguard
+    - gochecknoglobals
+    - gochecknoinits
+    - tagliatelle
+    - testpackage
+    - wsl
+    - noinlineerr
+    - err113
+    - forbidigo
+  settings:
+    ireturn:
+      allow:
+        - anon
+        - error
+        - empty
+        - stdlib
+        - Database
+        - ObserverVec
+        - generic
+    varnamelen:
+      max-distance: 12
+      ignore-decls:
+        - t testing.T
+        - T any
+        - tr trace.Trace
+        - w http.ResponseWriter
+        - r *http.Request
+        - tx *sql.Tx
+        - db *sql.DB
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - .Wrap(
+        - .Wrapf(
+        - .WithMessage(
+        - .WithMessagef(
+        - .WithStack(
+        - multierror.Append(
+        - .ErrorOrNil()
+        - errors.Join(
+    wsl_v5:
+      allow-first-in-block: true
+      allow-whole-block: false
+      branch-max-lines: 2
+      disable:
+        - send
+        - expr
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - .*_test.go$
+      - third_party$
+      - builtin$
+      - examples$
+      - tmp
+formatters:
+  enable:
+#    - gofmt
+    - gofumpt
+#    - goimports
+    - golines
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+  settings:
+    gofumpt:
+      # Choose whether to use the extra rules.
+      # Default: false
+      extra-rules: true
+    golines:
+      # Target maximum line length.
+      # Default: 100
+      max-len: 120
+      # Shorten single-line comments.
+      # Default: false
+      shorten-comments: true
+      # Default: true
+      reformat-tags: false

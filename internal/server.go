@@ -1,0 +1,417 @@
+package internal
+
+import (
+	"context"
+	"crypto/tls"
+	"encoding/csv"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"maps"
+	"net"
+	"net/http"
+	"os"
+	"path"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/urfave/cli/v3"
+	slogctx "github.com/veqryn/slog-context"
+	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/net/webdav"
+)
+
+const emptyURL = "https://tiddlywiki.com/empty.html"
+
+const (
+	AuthBasic  = "basic"
+	AuthHeader = "header"
+	AuthNone   = "none"
+)
+
+const (
+	ServerReadTimeout   = 60 * time.Second
+	ServerHeaderTimeout = 10 * time.Second
+)
+
+var CtxUserKey = any("ctx_user_key")
+
+// -------------------------------------------------------------------
+
+type userHandler struct {
+	fs         http.Handler
+	b          *Backuper
+	dav        *webdav.Handler
+	root       *os.Root
+	user       string
+	pass       string
+	home       string
+	fullListen string
+	mu         sync.Mutex
+}
+
+func newUserHandler(user, pass, homedir, fullListen string, backuper *Backuper) *userHandler {
+	slog.Debug("new user handler", "user", user, "homedir", homedir)
+
+	root, err := os.OpenRoot(homedir)
+	if err != nil {
+		slog.Error("server: open home dir failed", "user", user, "homedir", homedir, "err", err)
+		os.Exit(1)
+	}
+
+	return &userHandler{ //nolint:exhaustruct
+		b:    backuper,
+		user: user,
+		pass: pass,
+		home: homedir,
+		root: root,
+		dav: &webdav.Handler{ //nolint:exhaustruct
+			LockSystem: webdav.NewMemLS(),
+			FileSystem: webdav.Dir(homedir),
+			Logger: func(r *http.Request, err error) {
+				if err != nil {
+					slog.ErrorContext(r.Context(), "server: handle error", "req", r.URL, "err", err)
+				}
+			},
+		},
+		fs:         http.FileServerFS(root.FS()),
+		fullListen: fullListen,
+	}
+}
+
+func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	ctx := r.Context()
+	ctx = slogctx.Append(ctx, slog.String("user", u.user))
+	ctx = context.WithValue(ctx, CtxUserKey, u.user)
+	r = r.WithContext(ctx)
+
+	if u.b.handleBackupsPage(ctx, w, r, u.root, u.user) {
+		return
+	}
+
+	fullPath := filepath.Clean(path.Join(".", r.URL.Path))
+	if fullPath == "" {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+
+		return
+	}
+
+	slog.DebugContext(ctx, "server: resolved file", "fullPath", fullPath)
+
+	// HTML files will be created or sent back
+	if err := u.handleHTML(w, r, fullPath); err == nil {
+		return
+	} else if !errors.Is(err, ErrNotFound) {
+		slog.ErrorContext(ctx, "server: handle html error", "path", fullPath, "err", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+
+	// Everything else is browsable
+	if err := u.handleBrowse(w, r, fullPath); err != nil {
+		slog.ErrorContext(ctx, "server: handle browse error", "path", r.URL.Path, "err", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (u *userHandler) authenticate(pass string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(u.pass), []byte(pass)) == nil
+}
+
+var ErrNotFound = errors.New("not found")
+
+func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, fullPath string) error {
+	if ext := filepath.Ext(r.URL.Path); ext != ".html" && ext != ".htm" {
+		return ErrNotFound
+	}
+
+	ctx := slogctx.Append(r.Context(), slog.String("file", fullPath))
+
+	_, err := u.root.Stat(fullPath)
+	switch {
+	case os.IsNotExist(err):
+		// file not exists, try create empty
+		slog.InfoContext(ctx, "server: creating empty wiki", "path", fullPath, "root", u.root)
+
+		if err := createEmpty(ctx, u.root, fullPath); err != nil {
+			return fmt.Errorf("create empty wiki error: %w", err)
+		}
+	case err != nil:
+		return fmt.Errorf("check file %q error: %w", fullPath, err)
+	default:
+		// no error, file exists, make backup on put
+		if r.Method == http.MethodPut {
+			if err := u.b.create(ctx, u.root, u.user, fullPath); err != nil {
+				return fmt.Errorf("create backup error: %w", err)
+			}
+		}
+	}
+
+	u.dav.ServeHTTP(w, r)
+
+	return nil
+}
+
+// -------------------------------------------------------------------
+
+func createEmpty(ctx context.Context, root *os.Root, path string) error {
+	const filePerm = 0o600
+
+	slog.InfoContext(ctx, "server: downloading", "url", emptyURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, emptyURL, http.NoBody)
+	if err != nil {
+		return fmt.Errorf("download %s error: %w", emptyURL, err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp == nil {
+		return fmt.Errorf("download %s error: %w", emptyURL, err)
+	}
+
+	defer resp.Body.Close()
+
+	out, err := root.OpenFile(path, os.O_RDWR|os.O_CREATE, filePerm)
+	if err != nil {
+		return fmt.Errorf("open output file error: %w", err)
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return fmt.Errorf("write error: %w", err)
+	}
+
+	slog.InfoContext(ctx, "server: create empty wiki completed")
+
+	return nil
+}
+
+// -------------------------------------------------------------------
+
+func getFirstHeaderByPrefix(h http.Header, prefix string) (string, string) {
+	for name, values := range h {
+		if strings.HasPrefix(name, prefix) {
+			return strings.TrimLeft(name, prefix), values[0]
+		}
+	}
+
+	return "", ""
+}
+
+// -------------------------------------------------------------------
+
+type userHandlers map[string]*userHandler
+
+type MultiUserHandler struct {
+	handlers userHandlers
+	auth     string
+}
+
+func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Block .htpasswd, Prevent directory traversal
+	if strings.Contains(r.URL.Path, ".htpasswd") || strings.Contains(r.URL.Path, "..") {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	var user, pass string
+
+	switch m.auth {
+	case AuthBasic:
+		user, pass, _ = r.BasicAuth()
+	case AuthHeader:
+		user, pass = getFirstHeaderByPrefix(r.Header, "Auth")
+	}
+
+	if h, ok := m.handlers[user]; ok && h.authenticate(pass) {
+		h.ServeHTTP(w, r)
+
+		return
+	}
+
+	slog.InfoContext(r.Context(), "server: auth failed", "user", user)
+
+	w.Header().Set("WWW-Authenticate", `Basic realm="widdlerex"`)
+	http.Error(w, "Unauthorized", http.StatusUnauthorized)
+}
+
+func (m *MultiUserHandler) loadUsers(davDir, passPath, fullListen string, backuper *Backuper) error {
+	if _, fErr := os.Stat(passPath); os.IsNotExist(fErr) {
+		return errors.New("no password file found") //nolint:err113
+	}
+
+	p, err := os.Open(passPath)
+	if err != nil {
+		return fmt.Errorf("open users file %q error: %w", passPath, err)
+	}
+
+	defer p.Close()
+
+	ht := csv.NewReader(p)
+	ht.Comma = ':'
+	ht.Comment = '#'
+	ht.TrimLeadingSpace = true
+
+	entries, err := ht.ReadAll()
+	if err != nil {
+		return fmt.Errorf("read users from %q error: %w", passPath, err)
+	}
+
+	m.handlers = make(map[string]*userHandler, len(entries))
+
+	for _, parts := range entries {
+		if parts[0] == "" { // skip entries with empty user
+			continue
+		}
+
+		homedir := filepath.Clean(path.Join(davDir, parts[0]))
+		if err := ensureHomeExists(homedir); err != nil {
+			return fmt.Errorf("ensure home %q for user %q error: %w", parts[0], homedir, err)
+		}
+
+		m.handlers[parts[0]] = newUserHandler(parts[0], parts[1], homedir, fullListen, backuper)
+	}
+
+	return nil
+}
+
+// -------------------------------------------------------------------
+
+func ensureHomeExists(home string) error {
+	const homeDirPerm = 0o700
+
+	switch s, err := os.Stat(home); {
+	case err == nil:
+	case s == nil || os.IsNotExist(err):
+		slog.Info("creating home dir", "home", home)
+
+		if err := os.Mkdir(home, homeDirPerm); err != nil {
+			return fmt.Errorf("make home dir %q error: %w", home, err)
+		}
+	default:
+		return fmt.Errorf("check home dir %q error: %w", home, err)
+	}
+
+	return nil
+}
+
+// -------------------------------------------------------------------
+
+type Server struct {
+	auth       string
+	davDir     string
+	listen     string
+	passPath   string
+	tlsCert    string
+	tlsKey     string
+	fullListen string
+}
+
+func newServer(cmd *cli.Command) Server {
+	auth := cmd.String("auth")
+	if auth == "none" {
+		auth = AuthNone
+	}
+
+	server := Server{ //nolint:exhaustruct
+		davDir:   cmd.String("wikis"),
+		listen:   cmd.String("http"),
+		tlsCert:  cmd.String("tlscert"),
+		tlsKey:   cmd.String("tlskey"),
+		passPath: filepath.Clean(cmd.String("htpass")),
+		auth:     auth,
+	}
+
+	if server.tlsCert == "" || server.tlsKey == "" {
+		server.fullListen = "http://" + server.listen
+	} else {
+		server.fullListen = "https://" + server.listen
+	}
+
+	return server
+}
+
+func (c *Server) Validate() error {
+	var err error
+
+	c.davDir, err = filepath.Abs(c.davDir)
+	if err != nil {
+		return fmt.Errorf("check wikis dir %q error: %w", c.davDir, err)
+	}
+
+	if c.auth != AuthNone && c.auth != AuthBasic && c.auth != AuthHeader {
+		return errors.New("invalid auth type") //nolint:err113
+	}
+
+	return nil
+}
+
+func (c *Server) Start(ctx context.Context, backuper *Backuper) error {
+	var (
+		handler http.Handler
+		users   []string
+	)
+
+	if c.auth == AuthNone {
+		handler = newUserHandler("", "", c.davDir, c.fullListen, backuper)
+	} else {
+		m := &MultiUserHandler{auth: c.auth} //nolint:exhaustruct
+		if err := m.loadUsers(c.davDir, c.passPath, c.fullListen, backuper); err != nil {
+			slog.Error("server: load users error:", "err", err)
+			os.Exit(1)
+		}
+
+		users = slices.Collect(maps.Keys(m.handlers))
+		handler = m
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/", &Logger{handler})
+
+	srv := http.Server{ //nolint:exhaustruct
+		Handler:           mux,
+		ReadHeaderTimeout: ServerHeaderTimeout,
+		ReadTimeout:       ServerReadTimeout,
+	}
+
+	lconfig := &net.ListenConfig{} //nolint:exhaustruct
+
+	lis, err := lconfig.Listen(ctx, "tcp", c.listen)
+	if err != nil {
+		slog.Error("start listen error", "err", err)
+		os.Exit(1)
+	}
+
+	backuper.start(ctx, users)
+
+	slog.Info("server: listening on '" + c.fullListen + "'")
+
+	if c.tlsCert == "" || c.tlsKey == "" {
+		if err := srv.Serve(lis); err != nil {
+			return fmt.Errorf("serve failed: %w", err)
+		}
+
+		return nil
+	}
+
+	srv.TLSConfig = &tls.Config{ //nolint:exhaustruct
+		MinVersion:               tls.VersionTLS12,
+		CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
+		PreferServerCipherSuites: true,
+	}
+
+	if err := srv.ServeTLS(lis, c.tlsCert, c.tlsKey); err != nil {
+		return fmt.Errorf("serve failed failed: %w", err)
+	}
+
+	return nil
+}
