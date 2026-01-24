@@ -238,6 +238,8 @@ func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.InfoContext(r.Context(), "server: auth failed", "user", user)
+
 	w.Header().Set("WWW-Authenticate", `Basic realm="widdlerex"`)
 	http.Error(w, "Unauthorized", http.StatusUnauthorized)
 }

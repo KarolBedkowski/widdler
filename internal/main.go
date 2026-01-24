@@ -118,11 +118,10 @@ func Main() { //nolint:funlen
 				Usage: "Set or update user password in .htpasswd file.",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:     "htpass",
-						Value:    ".htpasswd",
-						Usage:    "Path to .htpasswd file.",
-						Required: true,
-						Sources:  cli.EnvVars("WIDDLEREX_HTPASS"),
+						Name:    "htpass",
+						Value:   ".htpasswd",
+						Usage:   "Path to .htpasswd file.",
+						Sources: cli.EnvVars("WIDDLEREX_HTPASS"),
 					},
 				},
 				Action: mainGenPass,
