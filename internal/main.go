@@ -26,92 +26,140 @@ func Main() { //nolint:funlen
 		Version: build,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:  "log.level",
-				Value: "info",
-				Usage: "Only log messages with the given severity or above. One of: [debug, info, warn, error]",
+				Name:     "log.level",
+				Value:    "info",
+				Usage:    "Only log messages with the given severity or above. One of: [debug, info, warn, error]",
+				Category: "Logging",
+				Sources:  cli.EnvVars("WIDDLEREX_LOG_LEVEL"),
 			},
 			&cli.StringFlag{
-				Name:  "log.format",
-				Value: "",
-				Usage: "Output format of log messages. One of: [logfmt, json, tint]",
+				Name:     "log.format",
+				Value:    "",
+				Usage:    "Output format of log messages. One of: [logfmt, json, tint]",
+				Category: "Logging",
+				Sources:  cli.EnvVars("WIDDLEREX_LOG_FORMAT"),
 			},
 		},
 		Commands: []*cli.Command{
 			{
 				Name:  "serve",
-				Usage: "start server",
+				Usage: "Start http server.",
 				Flags: []cli.Flag{
-					&cli.StringFlag{Name: "wikis", Value: ".", Usage: "Directory of TiddlyWikis to serve over WebDAV."},
-					&cli.StringFlag{Name: "http", Value: "localhost:8080", Usage: "Listen on"},
-					&cli.StringFlag{Name: "tlscert", Usage: "TLS certificate."},
-					&cli.StringFlag{Name: "tlskey", Usage: "TLS key."},
-					&cli.StringFlag{Name: "htpass", Value: ".htpasswd", Usage: "Path to .htpasswd file.."},
 					&cli.StringFlag{
-						Name:  "auth",
-						Value: "none",
-						Usage: "Enable HTTP Basic Authentication (basic, none, header).",
+						Name: "wikis", Value: ".", Usage: "Directory of TiddlyWikis to serve over WebDAV.",
+						Sources: cli.EnvVars("WIDDLEREX_WIKIS"),
 					},
 					&cli.StringFlag{
-						Name:  "backup.dir",
-						Value: "backups",
-						Usage: "Directory for backups in user directory.",
+						Name: "http", Value: "localhost:8080", Usage: "Listen on.", Category: "Server",
+						Sources: cli.EnvVars("WIDDLEREX_HTTP"),
+					},
+					&cli.StringFlag{
+						Name: "tlscert", Usage: "TLS certificate.", Category: "Server",
+						Sources: cli.EnvVars("WIDDLEREX_TLS_CERT"),
+					},
+					&cli.StringFlag{
+						Name: "tlskey", Usage: "TLS key.", Category: "Server",
+						Sources: cli.EnvVars("WIDDLEREX_TLS_KEY"),
+					},
+					&cli.StringFlag{
+						Name:     "htpass",
+						Value:    ".htpasswd",
+						Usage:    "Path to .htpasswd file.",
+						Category: "Authentication",
+						Sources:  cli.EnvVars("WIDDLEREX_HTPASS"),
+					},
+					&cli.StringFlag{
+						Name:     "auth",
+						Value:    "none",
+						Usage:    "Enable HTTP authentication (basic, header, none).",
+						Category: "Authentication",
+						Sources:  cli.EnvVars("WIDDLEREX_AUTH"),
+					},
+					&cli.StringFlag{
+						Name:     "backup.dir",
+						Value:    "backups",
+						Usage:    "Directory for backups in user directory.",
+						Category: "Backup",
+						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_DIR"),
 					},
 					&cli.BoolFlag{Name: "backup.compress", Value: false, Usage: "compress backup with GZIP."},
 					&cli.StringFlag{
-						Name:  "backup.policy",
-						Value: "7,7",
-						Usage: "Define backup policy.",
+						Name:     "backup.policy",
+						Value:    "7,7",
+						Usage:    "Backup policy for selected mode; see README.md.",
+						Category: "Backup",
+						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_POLICY"),
 					},
 					&cli.IntFlag{
-						Name:  "backup.interval",
-						Value: 30, //nolint:mnd
-						Usage: "Minimal time between backups (in seconds)",
+						Name:     "backup.interval",
+						Value:    30, //nolint:mnd
+						Usage:    "Minimal time between backups (in seconds)",
+						Category: "Backup",
+						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_INTERVAL"),
 					},
-					&cli.StringFlag{Name: "backup.mode", Value: "", Usage: "Backup mode (file, git, git-once, sqlite)"},
 					&cli.StringFlag{
-						Name:  "backup.sqlite_file",
-						Value: "backup.sqlite",
-						Usage: "Backup file for 'sqlite' backup mode",
+						Name:     "backup.mode",
+						Usage:    "Enable backup and select mode (file, sqlite)",
+						Category: "Backup",
+						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_MODE"),
+					},
+					&cli.StringFlag{
+						Name:     "backup.sqlite_file",
+						Value:    "backup.sqlite",
+						Usage:    "Backup file for 'sqlite' backup mode",
+						Category: "Backup",
+						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
 					},
 				},
 				Action: serverCmd,
 			},
 			{
-				Name: "gen-htpass",
+				Name:  "gen-htpass",
+				Usage: "Set or update user password in .htpasswd file.",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:     "htpass",
 						Value:    ".htpasswd",
 						Usage:    "Path to .htpasswd file.",
 						Required: true,
+						Sources:  cli.EnvVars("WIDDLEREX_HTPASS"),
 					},
 				},
 				Action: mainGenPass,
 			},
 			{
-				Name: "list-backups",
+				Name:  "list-backups",
+				Usage: "List created backups in sqlite file.",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:  "file",
-						Value: "backup.sqlite",
-						Usage: "Path to backup file.",
+						Name:    "file",
+						Value:   "backup.sqlite",
+						Usage:   "Path to backup file.",
+						Sources: cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
 					},
 					&cli.StringFlag{Name: "username", Usage: "Username for filter backups"},
 				},
 				Action: listSqliteBackupsCmd,
 			},
 			{
-				Name: "restore-backup",
+				Name:  "restore-backup",
+				Usage: "Restore given backup from sqlite file.",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:  "file",
-						Value: "backup.sqlite",
-						Usage: "Path to backup file.",
+						Name:    "file",
+						Value:   "backup.sqlite",
+						Usage:   "Path to backup file.",
+						Sources: cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
 					},
 					&cli.Int64Flag{Name: "backupid", Usage: "Backup ID to restore", Required: true},
 				},
 				Action: restoreSqliteBackups,
 			},
+		},
+		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			setupLogging(cmd.String("log.level"), cmd.String("log.format"))
+
+			return ctx, nil
 		},
 	}
 
@@ -123,8 +171,6 @@ func Main() { //nolint:funlen
 // -------------------------------------------------------------------
 
 func serverCmd(ctx context.Context, cmd *cli.Command) error {
-	setupLogging(cmd.String("log.level"), cmd.String("log.format"))
-
 	server := newServer(cmd)
 	if err := server.Validate(); err != nil {
 		return err
