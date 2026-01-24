@@ -238,7 +238,7 @@ func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("WWW-Authenticate", `Basic realm="widdler"`)
+	w.Header().Set("WWW-Authenticate", `Basic realm="widdlerex"`)
 	http.Error(w, "Unauthorized", http.StatusUnauthorized)
 }
 
