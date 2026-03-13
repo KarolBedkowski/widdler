@@ -245,7 +245,7 @@ func prompt(prompt string, secure bool) (string, error) {
 	var input string
 
 	if secure {
-		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		b, err := term.ReadPassword(int(os.Stdin.Fd())) //nolint:gosec
 		if err != nil {
 			return "", fmt.Errorf("read password error: %w", err)
 		}
