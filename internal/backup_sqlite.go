@@ -319,6 +319,7 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024) //nolint:mnd // 1k
 	fname := r.FormValue("filename")
 
 	if r.Method == http.MethodPost && fname != "" {
