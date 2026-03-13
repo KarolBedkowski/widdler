@@ -65,14 +65,14 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 		}
 
 	case "":
-		slog.Info("backups: backups disabled")
+		slog.InfoContext(ctx, "backups: backups disabled")
 
 		return backuper, nil
 	default:
 		return backuper, fmt.Errorf("unknown backup mode %q", backuper.mode) //nolint:err113
 	}
 
-	slog.Info("backups: backup enabled", "backup_mode", backuper.mode)
+	slog.InfoContext(ctx, "backups: backup enabled", "backup_mode", backuper.mode)
 
 	if _, ok := backuper.handler.(backupListHandler); ok {
 		backuper.supportBackupsPage = true
