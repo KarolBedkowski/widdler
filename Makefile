@@ -8,7 +8,7 @@ build: generate
 
 
 .PHONY: build_release
-build_release: 
+build_release:
 	go generate
 	go build -o widdler-ex -ldflags "-s -w" main.go
 

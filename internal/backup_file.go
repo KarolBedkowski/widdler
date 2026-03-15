@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	slogctx "github.com/veqryn/slog-context"
 )
 
 type BackuperFile struct {
@@ -71,9 +73,11 @@ func (b *BackuperFile) Create(ctx context.Context, root *os.Root, user, srcFileP
 func (b *BackuperFile) Clean(ctx context.Context, users []string) error {
 	for _, u := range users {
 		ud := path.Join(b.baseDir, u, b.backupDir)
-		slog.DebugContext(ctx, "filebackup: cleaning backup in "+ud)
+		lctx := slogctx.Append(ctx, slog.String("user", u))
 
-		if err := b.deleteOldBackups(ctx, ud); err != nil {
+		slog.DebugContext(lctx, "filebackup: cleaning backup in "+ud)
+
+		if err := b.deleteOldBackups(lctx, ud); err != nil {
 			return fmt.Errorf("delete old backup %q error: %w", ud, err)
 		}
 	}

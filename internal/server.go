@@ -104,9 +104,10 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	slog.DebugContext(ctx, "server: resolved file")
 
 	// HTML files will be created or sent back
-	if err := u.handleHTML(w, r, resolvedPath); err == nil {
+	switch err := u.handleHTML(w, r, resolvedPath); {
+	case err == nil:
 		return
-	} else if !errors.Is(err, ErrNotFound) {
+	case !errors.Is(err, ErrNotFound):
 		slog.ErrorContext(ctx, "server: handle html error", "path", resolvedPath, "err", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 
@@ -116,7 +117,7 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Everything else is browsable
 	switch err := u.handleBrowse(w, r, resolvedPath); {
 	case errors.Is(err, ErrNotFound):
-		slog.ErrorContext(ctx, "server: handle browse error", "path", resolvedPath, "err", err)
+		slog.ErrorContext(ctx, "server: handle browse error - not found", "path", resolvedPath, "err", err)
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 	case err != nil:
 		slog.ErrorContext(ctx, "server: handle browse error", "path", resolvedPath, "err", err)
@@ -150,7 +151,6 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, path st
 	case r.Method == http.MethodPut:
 		// no error, file exists, make backup on put
 		if err := u.b.create(ctx, u.root, u.user, path); err != nil {
-			// TODO: do no fail on error
 			return fmt.Errorf("create backup error: %w", err)
 		}
 	}

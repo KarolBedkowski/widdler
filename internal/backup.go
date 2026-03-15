@@ -114,12 +114,12 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 		return nil
 	}
 
-	// store backup time
-	defer func() { b.backupsAge[filekey] = time.Now() }()
-
 	if err := b.handler.Create(ctx, root, user, srcFilePath); err != nil {
 		return fmt.Errorf("create backup failed: %w", err)
 	}
+
+	// store backup time
+	b.backupsAge[filekey] = time.Now()
 
 	return nil
 }
@@ -131,13 +131,13 @@ func (b *Backuper) needBackup(key string) bool {
 			return true
 		}
 
-		// for other modes skip backup when oldbackup is not older that interval.
+		// skip backup when oldbackup is not older that interval.
 		if time.Since(oldBackupTs) < time.Duration(b.interval)*time.Second {
 			return false
 		}
 	}
 
-	// no backup in current run
+	// backup should be created
 	return true
 }
 
@@ -174,6 +174,8 @@ func (b *Backuper) handleBackupsPage(
 
 	return false
 }
+
+// ---------------------------------------------------------------------------------
 
 type backupListHandler interface {
 	ListHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, root *os.Root, user string) bool

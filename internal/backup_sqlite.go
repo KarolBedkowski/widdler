@@ -332,7 +332,7 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 			return
 		}
 
-		w.Header().Set("Location", "/") // FIXME: root
+		w.Header().Set("Location", "/")
 		w.WriteHeader(http.StatusFound)
 
 	default:

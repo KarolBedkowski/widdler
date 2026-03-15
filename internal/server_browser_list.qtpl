@@ -31,7 +31,7 @@ type ServerBrowserIndexPage struct {
 
 <hr/>
 
-{% if p.data.SupportBackupsDir %} 
+{% if p.data.SupportBackupsDir %}
 
 <h3>Backups</h3>
 <a href="/_backups">Browse backuped files</a>
@@ -52,14 +52,14 @@ type ServerBrowserIndexPage struct {
 	<tr><td><a href="{%s p.data.Parent %}">◀️ Go up...</a><br/></td></tr>
 {% endif %}
 
-{% for _, d := range p.data.Dirs %} 
+{% for _, d := range p.data.Dirs %}
 	<tr>
 		<td><a href="{%s p.data.Path %}/{%s d.Name() %}">📁 {%s d.Name() %}</a></td>
 		<td>{%s formatDate(must(d.Info()).ModTime()) %}</td>
 	</tr>
 {% endfor %}
 
-{% for _, f := range p.data.Files %} 
+{% for _, f := range p.data.Files %}
 	<tr>
 		<td><a href="{%s p.data.Path %}/{%s f.Name() %}">📄 {%s f.Name() %}</a></td>
 		{% code info := must(f.Info()) %}

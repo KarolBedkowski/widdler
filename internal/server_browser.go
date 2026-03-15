@@ -42,10 +42,8 @@ func (u *userHandler) handleNewFile(w http.ResponseWriter, r *http.Request, reqp
 	filename = filepath.Base(filepath.Clean(filename))
 
 	if !isValidFilename(filename) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte("Invalid filename"))
-
-		slog.DebugContext(r.Context(), "invalid filename", "filename", filename)
+		http.Error(w, "Invalid filename", http.StatusBadRequest)
+		slog.DebugContext(r.Context(), "handle new file error - invalid filename", "filename", filename)
 
 		return nil
 	}
@@ -55,7 +53,6 @@ func (u *userHandler) handleNewFile(w http.ResponseWriter, r *http.Request, reqp
 	}
 
 	slog.DebugContext(r.Context(), "redirect to", "reqpath", reqpath, "filename", filename)
-
 	http.Redirect(w, r, "/"+reqpath+"/"+filename, http.StatusMovedPermanently)
 
 	return nil
@@ -63,7 +60,6 @@ func (u *userHandler) handleNewFile(w http.ResponseWriter, r *http.Request, reqp
 
 func (u *userHandler) getDirContent(ctx context.Context, reqpath string) (DirContent, error) {
 	_ = ctx
-
 	rdfs, _ := u.root.FS().(fs.ReadDirFS)
 
 	entries, err := rdfs.ReadDir(reqpath)
