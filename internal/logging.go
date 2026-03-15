@@ -70,7 +70,6 @@ type Logger struct {
 func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestID := xid.New().String()
 	ctx := slogctx.Prepend(r.Context(), slog.String("request_id", requestID))
-
 	r = r.WithContext(ctx)
 
 	rlog := slog.With(
@@ -85,12 +84,15 @@ func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer func() {
 		if err := recover(); err != nil {
-			rlog.ErrorContext(ctx, "request error - recovered", "err", err, "dur", time.Since(startTS),
+			rlog.ErrorContext(ctx,
+				"request error - recovered",
+				"err", err,
+				"dur", time.Since(startTS),
 				"stack", string(debug.Stack()))
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("internal server error")) //nolint:errcheck
+
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		} else {
-			rlog.Info("request finished", "dur", time.Since(startTS))
+			rlog.InfoContext(ctx, "request finished", "dur", time.Since(startTS))
 		}
 	}()
 
