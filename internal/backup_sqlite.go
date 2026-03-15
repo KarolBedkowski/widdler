@@ -220,7 +220,7 @@ func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter,
 	backupid, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
 		slog.ErrorContext(ctx, "sqlitebackup: parse backup id failed", "err", err, "parts", parts)
-		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 
 		return false
 	}
@@ -231,7 +231,7 @@ func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter,
 	case "restore":
 		b.restoreBackupHandler(ctx, w, r, root, user, backupid)
 	default:
-		w.WriteHeader(http.StatusNotFound)
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 	}
 
 	return true
@@ -241,7 +241,7 @@ func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.Response
 	conn, err := b.getConnection(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "sqlitebackup: failed to get db connection", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 
 		return
 	}
@@ -249,7 +249,7 @@ func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.Response
 	backups, err := listSqliteBackups(ctx, conn, user)
 	if err != nil {
 		slog.ErrorContext(ctx, "sqlitebackup: failed to get backups", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 
 		return
 	}
@@ -265,7 +265,7 @@ func (b *BackuperSqlite) viewBackupHandler(ctx context.Context, w http.ResponseW
 	conn, err := b.getConnection(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "sqlitebackup: get db connection failed", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 
 		return
 	}
@@ -297,7 +297,7 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 	conn, err := b.getConnection(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "sqlitebackup: get db connection failed", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 
 		return
 	}
@@ -307,14 +307,14 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 	data, err := getFileFromDb(ctx, conn, backupid)
 	if err != nil {
 		slog.ErrorContext(ctx, "sqlitebackup: get file form db connection failed", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 
 		return
 	}
 
 	if data.Username != user {
 		slog.ErrorContext(ctx, "sqlitebackup: invalid user", "backup.user", data.Username, "user", user)
-		w.WriteHeader(http.StatusNotFound)
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 
 		return
 	}
@@ -324,8 +324,7 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 
 	if r.Method == http.MethodPost && fname != "" {
 		if !isValidFilename(fname) {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte("Invalid filename"))
+			http.Error(w, http.StatusText(http.StatusBadRequest)+" - invalid filename", http.StatusBadRequest)
 
 			return
 		}
@@ -334,7 +333,7 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 
 		if err := root.WriteFile(fname, data.Data, 0o660); err != nil { //nolint:mnd
 			slog.ErrorContext(ctx, "write file error", "backup.filename", data.Filename, "err", err)
-			w.WriteHeader(http.StatusInternalServerError)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 
 			return
 		}
@@ -765,7 +764,7 @@ func getFileFromDb(ctx context.Context, conn *sql.Conn, backupid int64) (*Sqlite
 		Scan(&compressed, &content, &isfull, &timestamp, &parentCompressed, &parentContent, &parentID,
 			&backup.Username, &backup.Filename)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errors.New("backup not found") //nolint:err113
+		return nil, ErrNotFound
 	} else if err != nil {
 		return nil, fmt.Errorf("get last full content failed: %w", err)
 	}
