@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -63,6 +64,30 @@ func parseLevel(s string) slog.Level {
 
 // -------------------------------------------------------------------
 
+type logResponseWriter struct {
+	http.ResponseWriter // compose original http.ResponseWriter
+
+	status int // http status
+	size   int // response size
+}
+
+func (r *logResponseWriter) Write(b []byte) (int, error) {
+	size, err := r.ResponseWriter.Write(b) // write response using original http.ResponseWriter
+	r.size += size                         // capture size
+
+	if err != nil {
+		return size, fmt.Errorf("write response error: %w", err)
+	}
+
+	return size, nil
+}
+
+func (r *logResponseWriter) WriteHeader(status int) {
+	r.ResponseWriter.WriteHeader(status)
+
+	r.status = status
+}
+
 type Logger struct {
 	next http.Handler
 }
@@ -77,9 +102,10 @@ func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"method", r.Method,
 		"path", r.URL.Path,
 		"proto", r.Proto,
-		"content_length", r.ContentLength,
+		"request_size", r.ContentLength,
 	)
 
+	lrw := logResponseWriter{ResponseWriter: w, status: 0, size: 0}
 	startTS := time.Now()
 
 	defer func() {
@@ -92,9 +118,15 @@ func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		} else {
-			rlog.InfoContext(ctx, "request finished", "dur", time.Since(startTS))
+			level := slog.LevelInfo
+			if lrw.status >= 500 { //nolint:mnd
+				level = slog.LevelWarn
+			}
+
+			rlog.Log(ctx, level, "request finished", "dur", time.Since(startTS), "status", lrw.status,
+				"response_size", lrw.size)
 		}
 	}()
 
-	l.next.ServeHTTP(w, r)
+	l.next.ServeHTTP(&lrw, r)
 }

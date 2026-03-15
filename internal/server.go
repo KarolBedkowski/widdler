@@ -213,6 +213,8 @@ func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	user, pass, _ := r.BasicAuth()
 	switch h, ok := m.handlers[user]; {
+	case user == "":
+		// do no log initial, pre-auth errors
 	case !ok:
 		slog.InfoContext(r.Context(), "server: auth failed", "user", user, "reason", "unknown user")
 	case ok && h.authenticate(pass):
