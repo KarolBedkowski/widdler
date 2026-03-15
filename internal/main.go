@@ -71,7 +71,7 @@ func Main() { //nolint:funlen
 					&cli.StringFlag{
 						Name:     "auth",
 						Value:    "none",
-						Usage:    "Enable HTTP authentication (basic, header, none).",
+						Usage:    "Enable HTTP authentication (basic, none).",
 						Category: "Authentication",
 						Sources:  cli.EnvVars("WIDDLEREX_AUTH"),
 					},
@@ -176,7 +176,7 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	slog.Info("Wikis directory: " + server.davDir)
-	slog.Info("Auth: " + server.auth)
+	slog.Info("Auth: " + server.authMethod)
 
 	backuper, err := newBackuper(ctx, cmd)
 	if err != nil {
