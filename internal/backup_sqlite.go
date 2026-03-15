@@ -156,7 +156,7 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 	}
 
 	for _, userfile := range usersfiles {
-		lctx := slogctx.With(ctx, slog.String("user", userfile.Username), slog.String("file", userfile.Filename))
+		lctx := slogctx.Append(ctx, slog.String("user", userfile.Username), slog.String("file", userfile.Filename))
 
 		tx, err := b.db.BeginTx(lctx, nil)
 		if err != nil {

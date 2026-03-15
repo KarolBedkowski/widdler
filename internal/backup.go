@@ -95,7 +95,7 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 		return nil
 	}
 
-	ctx = slogctx.With(ctx, slog.String("file", srcFilePath))
+	ctx = slogctx.Append(ctx, slog.String("file", srcFilePath))
 
 	if _, err := root.Stat(srcFilePath); err != nil {
 		if os.IsNotExist(err) {
