@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"crypto/tls"
+	"embed"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -36,6 +37,9 @@ const (
 	ServerReadTimeout   = 60 * time.Second
 	ServerHeaderTimeout = 10 * time.Second
 )
+
+//go:embed *.ico
+var staticFS embed.FS
 
 // -------------------------------------------------------------------
 
@@ -340,6 +344,7 @@ func (c *Server) Start(ctx context.Context, backuper *Backuper) error {
 	}
 
 	mux := http.NewServeMux()
+	mux.Handle("/favicon.ico", http.FileServerFS(staticFS))
 	mux.Handle("/", &Logger{handler})
 
 	srv := http.Server{ //nolint:exhaustruct
