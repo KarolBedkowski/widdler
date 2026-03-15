@@ -19,6 +19,8 @@ lint:
 	# go install go.uber.org/nilaway/cmd/nilaway@latest
 	nilaway ./... || true
 	typos *.go
+	# go install golang.org/x/vuln/cmd/govulncheck@lates
+	govulncheck ./...
 
 .PHONY: format
 format:
