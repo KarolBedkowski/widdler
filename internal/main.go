@@ -23,6 +23,7 @@ func Main() { //nolint:funlen
 	//nolint:exhaustruct
 	cmd := &cli.Command{
 		Name:    "widdler-ex",
+		Usage:   "Web/dav server for TiddlyWiki wikis",
 		Version: build,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -35,7 +36,7 @@ func Main() { //nolint:funlen
 			&cli.StringFlag{
 				Name:     "log.format",
 				Value:    "",
-				Usage:    "Output format of log messages. One of: [logfmt, json, tint]",
+				Usage:    "The output format of log messages. One of: [logfmt, json, tint]",
 				Category: "Logging",
 				Sources:  cli.EnvVars("WIDDLEREX_LOG_FORMAT"),
 			},
@@ -43,7 +44,7 @@ func Main() { //nolint:funlen
 		Commands: []*cli.Command{
 			{
 				Name:  "serve",
-				Usage: "Start http server.",
+				Usage: "Start an HTTP/HTTPS server.",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name: "wikis", Value: ".", Usage: "Directory of TiddlyWikis to serve over WebDAV.",
@@ -128,7 +129,7 @@ func Main() { //nolint:funlen
 			},
 			{
 				Name:  "list-backups",
-				Usage: "List created backups in sqlite file.",
+				Usage: "List created backups in SQLite file.",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:    "file",
@@ -142,7 +143,7 @@ func Main() { //nolint:funlen
 			},
 			{
 				Name:  "restore-backup",
-				Usage: "Restore given backup from sqlite file.",
+				Usage: "Restore a given backup from SQLite file.",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:    "file",
