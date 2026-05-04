@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	slogctx "github.com/veqryn/slog-context"
 )
 
 type BackuperFile struct {
@@ -71,9 +73,11 @@ func (b *BackuperFile) Create(ctx context.Context, root *os.Root, user, srcFileP
 func (b *BackuperFile) Clean(ctx context.Context, users []string) error {
 	for _, u := range users {
 		ud := path.Join(b.baseDir, u, b.backupDir)
-		slog.DebugContext(ctx, "filebackup: cleaning backup in "+ud)
+		lctx := slogctx.Append(ctx, slog.String("user", u))
 
-		if err := b.deleteOldBackups(ud); err != nil {
+		slog.DebugContext(lctx, "filebackup: cleaning backup in "+ud)
+
+		if err := b.deleteOldBackups(lctx, ud); err != nil {
 			return fmt.Errorf("delete old backup %q error: %w", ud, err)
 		}
 	}
@@ -125,7 +129,7 @@ func (b *BackuperFile) backupFile(ctx context.Context, root *os.Root, path, dstF
 	return nil
 }
 
-func (b *BackuperFile) deleteOldBackups(directory string) error {
+func (b *BackuperFile) deleteOldBackups(ctx context.Context, directory string) error {
 	prefix := path.Join(directory, "*--*.htm*")
 
 	// find all files with prefix
@@ -140,7 +144,7 @@ func (b *BackuperFile) deleteOldBackups(directory string) error {
 		toDel := selectFilesToDel(files, time.Now(), b.keepOnWrite, b.keepDaily)
 		// delete
 		for _, fname := range toDel {
-			slog.Debug("filebackup: delete old backup", "path", fname)
+			slog.DebugContext(ctx, "filebackup: delete old backup", "path", fname)
 
 			if err := os.Remove(fname); err != nil {
 				return fmt.Errorf("remove %q error: %w", fname, err)

@@ -21,15 +21,23 @@ import (
 
 const cleanTaskInterval = 3600 // sec
 
+const (
+	backupModeFile   = "file"
+	backupModeSqlite = "sqlite"
+)
+
+// ---------------------------------------------------------------------------------
+
 type BackupHandler interface {
 	Create(ctx context.Context, root *os.Root, user, srcFilePath string) error
 	Clean(ctx context.Context, users []string) error
 }
 
-const (
-	backupModeFile   = "file"
-	backupModeSqlite = "sqlite"
-)
+type backupListHandler interface {
+	ListHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, root *os.Root, user string) bool
+}
+
+// ---------------------------------------------------------------------------------
 
 type Backuper struct {
 	handler            BackupHandler
@@ -65,14 +73,14 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 		}
 
 	case "":
-		slog.Info("backups: backups disabled")
+		slog.InfoContext(ctx, "backups: backups disabled")
 
 		return backuper, nil
 	default:
 		return backuper, fmt.Errorf("unknown backup mode %q", backuper.mode) //nolint:err113
 	}
 
-	slog.Info("backups: backup enabled", "backup_mode", backuper.mode)
+	slog.InfoContext(ctx, "backups: backup enabled", "backup_mode", backuper.mode)
 
 	if _, ok := backuper.handler.(backupListHandler); ok {
 		backuper.supportBackupsPage = true
@@ -95,7 +103,7 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 		return nil
 	}
 
-	ctx = slogctx.With(ctx, slog.String("file", srcFilePath))
+	ctx = slogctx.Append(ctx, slog.String("file", srcFilePath))
 
 	if _, err := root.Stat(srcFilePath); err != nil {
 		if os.IsNotExist(err) {
@@ -114,12 +122,12 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 		return nil
 	}
 
-	// store backup time
-	defer func() { b.backupsAge[filekey] = time.Now() }()
-
 	if err := b.handler.Create(ctx, root, user, srcFilePath); err != nil {
 		return fmt.Errorf("create backup failed: %w", err)
 	}
+
+	// store backup time
+	b.backupsAge[filekey] = time.Now()
 
 	return nil
 }
@@ -131,13 +139,13 @@ func (b *Backuper) needBackup(key string) bool {
 			return true
 		}
 
-		// for other modes skip backup when oldbackup is not older that interval.
+		// skip backup when oldbackup is not older that interval.
 		if time.Since(oldBackupTs) < time.Duration(b.interval)*time.Second {
 			return false
 		}
 	}
 
-	// no backup in current run
+	// backup should be created
 	return true
 }
 
@@ -173,8 +181,4 @@ func (b *Backuper) handleBackupsPage(
 	}
 
 	return false
-}
-
-type backupListHandler interface {
-	ListHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, root *os.Root, user string) bool
 }

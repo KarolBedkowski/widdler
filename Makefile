@@ -8,7 +8,7 @@ build: generate
 
 
 .PHONY: build_release
-build_release: 
+build_release:
 	go generate
 	go build -o widdler-ex -ldflags "-s -w" main.go
 
@@ -19,6 +19,8 @@ lint:
 	# go install go.uber.org/nilaway/cmd/nilaway@latest
 	nilaway ./... || true
 	typos *.go
+	# go install golang.org/x/vuln/cmd/govulncheck@lates
+	govulncheck ./...
 
 .PHONY: format
 format:

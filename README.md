@@ -12,12 +12,11 @@ Features
 
  -  TiddlyWikis are served over WebDav so you can save directly from the browser.
  -  Automatically create new wiki files by browsing to a non-existent html file.
- -  Built in .htpasswd management (Adding users).
+ -  Built in .htpasswd management: add user, set password.
  -  Password protection via HTTP Basic Authentication.
- -  Multiple users (adding another user to the .htaccess file creates a new user
-    namespace).
+ -  Multiple users (each user defined in .htpasswd has their own namespace).
  -  Optional TLS support.
- -  Backups on file save using local files or sqlite database.
+ -  Backups on file save using local files or SQLite database.
 
 Installation
 ============
@@ -72,16 +71,16 @@ Simply hit the save button!
 Backups
 =======
 
-Widdler can backup current file before write changes.
+Widdler can backup the current file before writing changes.
 
-Widdler support two main modes for backup (selected by `--backup.mode`
+Widdler supports two main modes for backup (selected by `--backup.mode`
 argument):
 
- -  copy files into backup directory (`file` mode)
- -  keep backups (full and incremental) in sqlite database (`sqlite` mode)
+ -  copy files into a backup directory (`file` mode)
+ -  store backups (full and incremental) in sqlite database (`sqlite` mode)
 
-`--backup.interval` argument set minimal time (in seconds) between write
-changes of each file.
+The `--backup.interval` argument sets the minimum time (in seconds) between write
+changes for each file.
 
 
 "File" mode
@@ -89,13 +88,13 @@ changes of each file.
 
 Additional parameters:
 
- -  `--backup.dir` - directory for backup files (directory in user home in
-    multi-user mode)
- -  `--backup.compress` - enable file compression
- -  `--backup.policy` - set number of backups to keep in form of
+ -  `--backup.dir` - the directory where store backup files (in user's home directory
+    in multi-user mode)
+ -  `--backup.compress` - enables file compression
+ -  `--backup.policy` - sets number of backups to keep, in form of
     `<number of daily backups>,<number of regular backups>`
 
-In multi-user mode each user have own "backup" directory in home.
+In multi-user mode, each user has their own "backup" directory in their home.
 
 Old backup files are deleted in background.
 
@@ -111,21 +110,20 @@ widdler-ex serve --backup=file --backup.policy=7,5 --wikis ./wiki/ --backup.inte
 
 Additional parameters:
 
- -  `--backup.sqlite_file` - file name for sqlite database; created if not exists.
-    One file for all user.
- -  `--backup.policy` - set number of backups to keep in form
+ -  `--backup.sqlite_file` - specifies the file name for SQLite database; Widdler will create it if it not exists.
+    All users' backups are stored in one file.
+ -  `--backup.policy` - sets the number of backups to keep, in form
     `<number of full backups>,<number of incremental backups>,<interval between full backups>`.
-    Every part can be empty. Interval must be defined as "300s", "2h", "2h45m"
-    etc; default - 8h.
- -  `--backup.compress` - compress full and big incremental backups.
+    Each part can be empty. Interval must be defined as "300s", "2h", "2h45m" etc. The default value is `8h`.
+ -  `--backup.compress` - enables compression of full and big incremental backups.
 
-Incremental backups store only changes from last "full" backup, so safe a lot
-of space. Full backups are compressed.
+Incremental backups store only the changes from last "full" backup, which can save a lot of space.
+Full backups can be compressed.
 
-For manage backups in sqlite database Widdler provide two commands:
+For manage backups in SQLite database Widdler provide two commands:
 
- -  `list-backups` - list backups for one or all users
- -  `restore-backup` - restore one backup and print it on stdout.
+ -  `list-backups` - lists backups for one or all users
+ -  `restore-backup` - restores one backup and print it on standard output.
 
 Old backup files are deleted in background.
 
