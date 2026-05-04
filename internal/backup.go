@@ -21,15 +21,23 @@ import (
 
 const cleanTaskInterval = 3600 // sec
 
+const (
+	backupModeFile   = "file"
+	backupModeSqlite = "sqlite"
+)
+
+// ---------------------------------------------------------------------------------
+
 type BackupHandler interface {
 	Create(ctx context.Context, root *os.Root, user, srcFilePath string) error
 	Clean(ctx context.Context, users []string) error
 }
 
-const (
-	backupModeFile   = "file"
-	backupModeSqlite = "sqlite"
-)
+type backupListHandler interface {
+	ListHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, root *os.Root, user string) bool
+}
+
+// ---------------------------------------------------------------------------------
 
 type Backuper struct {
 	handler            BackupHandler
@@ -173,10 +181,4 @@ func (b *Backuper) handleBackupsPage(
 	}
 
 	return false
-}
-
-// ---------------------------------------------------------------------------------
-
-type backupListHandler interface {
-	ListHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, root *os.Root, user string) bool
 }
