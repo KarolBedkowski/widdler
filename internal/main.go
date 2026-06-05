@@ -17,6 +17,12 @@ import (
 
 var build = "dev"
 
+const (
+	DefaultBackupFilename = "backup.sqlite"
+	CliCategoryServer     = "Server"
+	CliCategoryBackup     = "Backup"
+)
+
 // -------------------------------------------------------------------
 
 func Main() { //nolint:funlen
@@ -51,15 +57,15 @@ func Main() { //nolint:funlen
 						Sources: cli.EnvVars("WIDDLEREX_WIKIS"),
 					},
 					&cli.StringFlag{
-						Name: "http", Value: "localhost:8080", Usage: "Listen on.", Category: "Server",
+						Name: "http", Value: "localhost:8080", Usage: "Listen on.", Category: CliCategoryServer,
 						Sources: cli.EnvVars("WIDDLEREX_HTTP"),
 					},
 					&cli.StringFlag{
-						Name: "tlscert", Usage: "TLS certificate.", Category: "Server",
+						Name: "tlscert", Usage: "TLS certificate.", Category: CliCategoryServer,
 						Sources: cli.EnvVars("WIDDLEREX_TLS_CERT"),
 					},
 					&cli.StringFlag{
-						Name: "tlskey", Usage: "TLS key.", Category: "Server",
+						Name: "tlskey", Usage: "TLS key.", Category: CliCategoryServer,
 						Sources: cli.EnvVars("WIDDLEREX_TLS_KEY"),
 					},
 					&cli.StringFlag{
@@ -80,7 +86,7 @@ func Main() { //nolint:funlen
 						Name:     "backup.dir",
 						Value:    "backups",
 						Usage:    "Directory for backups in user directory.",
-						Category: "Backup",
+						Category: CliCategoryBackup,
 						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_DIR"),
 					},
 					&cli.BoolFlag{Name: "backup.compress", Value: false, Usage: "compress backup with GZIP."},
@@ -88,7 +94,7 @@ func Main() { //nolint:funlen
 						Name:     "backup.policy",
 						Value:    "7,7",
 						Usage:    "Backup policy for selected mode; see README.md.",
-						Category: "Backup",
+						Category: CliCategoryBackup,
 						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_POLICY"),
 					},
 					&cli.IntFlag{
@@ -106,9 +112,9 @@ func Main() { //nolint:funlen
 					},
 					&cli.StringFlag{
 						Name:     "backup.sqlite_file",
-						Value:    "backup.sqlite",
+						Value:    DefaultBackupFilename,
 						Usage:    "Backup file for 'sqlite' backup mode",
-						Category: "Backup",
+						Category: CliCategoryBackup,
 						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
 					},
 				},
@@ -133,7 +139,7 @@ func Main() { //nolint:funlen
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:    "file",
-						Value:   "backup.sqlite",
+						Value:   DefaultBackupFilename,
 						Usage:   "Path to backup file.",
 						Sources: cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
 					},
@@ -147,7 +153,7 @@ func Main() { //nolint:funlen
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:    "file",
-						Value:   "backup.sqlite",
+						Value:   DefaultBackupFilename,
 						Usage:   "Path to backup file.",
 						Sources: cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
 					},
@@ -246,7 +252,7 @@ func prompt(prompt string, secure bool) (string, error) {
 	var input string
 
 	if secure {
-		b, err := term.ReadPassword(int(os.Stdin.Fd())) //nolint:gosec
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
 			return "", fmt.Errorf("read password error: %w", err)
 		}
