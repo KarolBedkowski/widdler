@@ -39,7 +39,7 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpa
 func (u *userHandler) handleNewFile(w http.ResponseWriter, r *http.Request, reqpath string) error {
 	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024) //nolint:mnd // 1k
 	filename := r.FormValue("filename")
-	filename = filepath.Base(filepath.Clean(filename))
+	filename = filepath.Base(filename)
 
 	if !isValidFilename(filename) {
 		http.Error(w, "Invalid filename", http.StatusBadRequest)

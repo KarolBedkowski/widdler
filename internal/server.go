@@ -97,7 +97,7 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolvedPath := filepath.Clean(path.Join(".", r.URL.Path))
+	resolvedPath := path.Join(".", filepath.FromSlash(filepath.Clean("/"+strings.Trim(r.URL.Path, "/"))))
 	if resolvedPath == "" {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 
