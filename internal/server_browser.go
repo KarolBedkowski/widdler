@@ -24,7 +24,7 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpa
 
 	content, err := u.getDirContent(r.Context(), reqpath)
 	if err != nil {
-		return fmt.Errorf("read dir %q error: %w", u.home, err)
+		return fmt.Errorf("read dir content error: %w", err)
 	}
 
 	w.Header().Add("Cache-Control", "no-cache")
@@ -64,7 +64,7 @@ func (u *userHandler) getDirContent(ctx context.Context, reqpath string) (DirCon
 
 	entries, err := rdfs.ReadDir(reqpath)
 	if err != nil {
-		return DirContent{}, fmt.Errorf("read dir %q error: %w", u.home, err)
+		return DirContent{}, fmt.Errorf("read dir error: %w", err)
 	}
 
 	files := make([]fs.DirEntry, 0, len(entries))

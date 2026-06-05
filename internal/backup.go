@@ -112,7 +112,7 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 			return nil
 		}
 
-		return fmt.Errorf("stat file %q error: %w", srcFilePath, err)
+		return fmt.Errorf("stat file error: %w", err)
 	}
 
 	filekey := user + "|" + root.Name() + "|" + srcFilePath

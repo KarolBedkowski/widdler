@@ -284,10 +284,10 @@ func ensureHomeExists(home string) error {
 		slog.Info("creating home dir", "home", home)
 
 		if err := os.Mkdir(home, homeDirPerm); err != nil {
-			return fmt.Errorf("make home dir %q error: %w", home, err)
+			return fmt.Errorf("make home eror: %w", err)
 		}
 	default:
-		return fmt.Errorf("check home dir %q error: %w", home, err)
+		return fmt.Errorf("check home error: %w", err)
 	}
 
 	return nil

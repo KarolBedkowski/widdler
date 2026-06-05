@@ -296,7 +296,7 @@ func mainGenPass(ctx context.Context, cmd *cli.Command) error {
 
 	f, err := os.OpenFile(passPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
 	if err != nil {
-		return fmt.Errorf("open passfile %q error: %w", passPath, err)
+		return fmt.Errorf("open passfile error: %w", err)
 	}
 
 	if _, err := fmt.Fprintf(f, "%s:%s\n", user, hash); err != nil {
