@@ -182,6 +182,10 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	if err := ensureWikisHomeExists(server.davDir); err != nil {
+		return err
+	}
+
 	slog.Info("Wikis directory: " + server.davDir)
 	slog.Info("Auth: " + server.authMethod)
 
@@ -309,3 +313,20 @@ func mainGenPass(ctx context.Context, cmd *cli.Command) error {
 }
 
 // -------------------------------------------------------------------
+
+func ensureWikisHomeExists(dir string) error {
+	const dirPerm = 0o700
+
+	// create backup dir if not exists
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		slog.Info("creating wikis home dir " + dir)
+
+		if err := os.Mkdir(dir, dirPerm); err != nil {
+			return fmt.Errorf("create wikis dir error: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("stat wikis dir error: %w", err)
+	}
+
+	return nil
+}
