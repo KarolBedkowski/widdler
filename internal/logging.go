@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lmittmann/tint"
+	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 	"github.com/rs/xid"
 	slogctx "github.com/veqryn/slog-context"
@@ -32,7 +33,7 @@ func setupLogging(level, format string) {
 
 	switch logFormat {
 	case "tint":
-		handler = tint.NewHandler(os.Stderr, &tint.Options{ //nolint:exhaustruct
+		handler = tint.NewHandler(colorable.NewColorable(os.Stderr), &tint.Options{ //nolint:exhaustruct
 			AddSource:  true,
 			Level:      parseLevel(level),
 			NoColor:    !isatty,

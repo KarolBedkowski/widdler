@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/lmittmann/tint v1.1.3
+	github.com/mattn/go-colorable v0.1.15
 	github.com/mattn/go-isatty v0.0.22
 	github.com/rs/xid v1.6.0
 	github.com/sergi/go-diff v1.4.0
