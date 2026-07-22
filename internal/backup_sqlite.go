@@ -197,6 +197,10 @@ func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter,
 	url := r.URL.Path
 	prefix := "/_backups"
 
+	if !strings.HasPrefix(url, prefix) {
+		return false
+	}
+
 	slog.DebugContext(ctx, "sqlitebackup: list backups", "url", url)
 
 	if url == prefix || url == prefix+"/" {
@@ -206,10 +210,6 @@ func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter,
 	}
 
 	prefix += "/"
-
-	if !strings.HasPrefix(url, prefix) {
-		return false
-	}
 
 	// url in form '<prefix>/<backupid>/<action>'
 	parts := strings.Split(strings.TrimPrefix(url, prefix), "/")
@@ -498,7 +498,8 @@ func (b *BackuperSqlite) loadPolicy(policy string) error { //nolint:cyclop
 
 		if b.maxFullBackupAge < 0 {
 			return fmt.Errorf( //nolint:err113
-				"invalid policy value for full backup interval %q; must be greater than 0", fields[2])
+				"invalid policy value for full backup interval %q; must be greater than 0", fields[2],
+			)
 		}
 	}
 
