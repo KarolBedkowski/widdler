@@ -97,12 +97,7 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolvedPath := path.Join(".", filepath.FromSlash(filepath.Clean("/"+strings.Trim(r.URL.Path, "/"))))
-	if resolvedPath == "" {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-
-		return
-	}
+	resolvedPath := filepath.Clean(filepath.Join(".", r.URL.Path))
 
 	ctx = slogctx.Append(ctx, slog.String("file_path", resolvedPath))
 	slog.DebugContext(ctx, "server: resolved file")
