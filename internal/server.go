@@ -93,6 +93,12 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := slogctx.Append(r.Context(), slog.String("user", u.user))
 	r = r.WithContext(ctx)
 
+	if strings.HasSuffix(r.URL.Path, "/favicon.ico") {
+		http.ServeFileFS(w, r, staticFS, "favicon.ico")
+
+		return
+	}
+
 	if u.b.handleBackupsPage(ctx, w, r, u.root, u.user) {
 		return
 	}
