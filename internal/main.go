@@ -195,7 +195,7 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if err := server.Start(ctx, &backuper); err != nil {
-		return fmt.Errorf("serve error: %w", err)
+		return fmt.Errorf("serve: %w", err)
 	}
 
 	return nil
@@ -258,12 +258,12 @@ func prompt(prompt string, secure bool) (string, error) {
 	if secure {
 		b, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
-			return "", fmt.Errorf("read password error: %w", err)
+			return "", fmt.Errorf("read password: %w", err)
 		}
 
 		input = string(b)
 	} else if _, err := fmt.Scanln(&input); err != nil {
-		return "", fmt.Errorf("read stdin error: %w", err)
+		return "", fmt.Errorf("read stdin: %w", err)
 	}
 
 	if input == "" {
@@ -279,32 +279,32 @@ func mainGenPass(ctx context.Context, cmd *cli.Command) error {
 
 	user, err := prompt("Username: ", false)
 	if err != nil {
-		return fmt.Errorf("get username error: %w", err)
+		return fmt.Errorf("get username: %w", err)
 	}
 
 	pass, err := prompt("Password: ", true)
 	if err != nil {
-		return fmt.Errorf("get password error: %w", err)
+		return fmt.Errorf("get password: %w", err)
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(pass), 11) //nolint:mnd
 	if err != nil {
-		return fmt.Errorf("hash password error: %w", err)
+		return fmt.Errorf("hash password: %w", err)
 	}
 
 	const filePerm = 0o600
 
 	f, err := os.OpenFile(passPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
 	if err != nil {
-		return fmt.Errorf("open passfile error: %w", err)
+		return fmt.Errorf("open passfile: %w", err)
 	}
 
 	if _, err := fmt.Fprintf(f, "%s:%s\n", user, hash); err != nil {
-		return fmt.Errorf("write to passfile error: %w", err)
+		return fmt.Errorf("write to passfile: %w", err)
 	}
 
 	if err = f.Close(); err != nil {
-		return fmt.Errorf("close passfile error: %w", err)
+		return fmt.Errorf("close passfile: %w", err)
 	}
 
 	fmt.Printf("Added %q to %q\n", user, passPath)
@@ -322,10 +322,10 @@ func ensureWikisHomeExists(dir string) error {
 		slog.Info("creating wikis home dir " + dir)
 
 		if err := os.Mkdir(dir, dirPerm); err != nil {
-			return fmt.Errorf("create wikis dir error: %w", err)
+			return fmt.Errorf("create wikis dir: %w", err)
 		}
 	} else if err != nil {
-		return fmt.Errorf("stat wikis dir error: %w", err)
+		return fmt.Errorf("stat wikis dir: %w", err)
 	}
 
 	return nil

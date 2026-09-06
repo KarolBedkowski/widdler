@@ -77,7 +77,7 @@ func (r *logResponseWriter) Write(b []byte) (int, error) {
 	r.size += size                         // capture size
 
 	if err != nil {
-		return size, fmt.Errorf("write response error: %w", err)
+		return size, fmt.Errorf("write response: %w", err)
 	}
 
 	return size, nil

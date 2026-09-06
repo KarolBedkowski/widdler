@@ -384,7 +384,7 @@ func (b *BackuperSqlite) getUsersFiles(ctx context.Context) ([]UserFile, error) 
 		uf := UserFile{} //nolint:exhaustruct
 
 		if err := rows.Scan(&uf.Username, &uf.Filename); err != nil {
-			return nil, fmt.Errorf("scan user files error: %w", err)
+			return nil, fmt.Errorf("scan user files: %w", err)
 		}
 
 		usersfiles = append(usersfiles, uf)
@@ -597,7 +597,7 @@ func (*BackuperSqlite) compressContent(content []byte) ([]byte, error) {
 	zw.Close()
 
 	if err != nil {
-		return nil, fmt.Errorf("compress content error: %w", err)
+		return nil, fmt.Errorf("compress content: %w", err)
 	}
 
 	return buf.Bytes(), nil
@@ -694,7 +694,7 @@ func listSqliteBackups(ctx context.Context, conn *sql.Conn, username string) ([]
 		var ts, isfull int64
 
 		if err := rows.Scan(&sb.ID, &sb.Username, &ts, &sb.Filename, &isfull); err != nil {
-			return nil, fmt.Errorf("scan error: %w", err)
+			return nil, fmt.Errorf("scan: %w", err)
 		}
 
 		sb.IsFull = isfull > 0

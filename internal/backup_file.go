@@ -78,7 +78,7 @@ func (b *BackuperFile) Clean(ctx context.Context, users []string) error {
 		slog.DebugContext(lctx, "filebackup: cleaning backup in "+ud)
 
 		if err := b.deleteOldBackups(lctx, ud); err != nil {
-			return fmt.Errorf("delete old backup %q error: %w", ud, err)
+			return fmt.Errorf("delete old backup %q: %w", ud, err)
 		}
 	}
 
@@ -94,14 +94,14 @@ func (b *BackuperFile) backupFile(ctx context.Context, root *os.Root, path, dstF
 		// already exists; skip
 		return nil
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("stat backup destination error: %w", err)
+		return fmt.Errorf("stat backup destination: %w", err)
 	}
 
 	slog.DebugContext(ctx, "filebackup: backup file", "src", path, "dst", dstFilename)
 
 	source, err := root.Open(path)
 	if err != nil {
-		return fmt.Errorf("open file for backup error: %w", err)
+		return fmt.Errorf("open file for backup: %w", err)
 	}
 	defer closeFile(ctx, source, path)
 
@@ -109,7 +109,7 @@ func (b *BackuperFile) backupFile(ctx context.Context, root *os.Root, path, dstF
 
 	destination, err = root.Create(dstFilename)
 	if err != nil {
-		return fmt.Errorf("create backup file error: %w", err)
+		return fmt.Errorf("create backup file: %w", err)
 	}
 	defer closeFile(ctx, destination, dstFilename)
 
@@ -118,12 +118,12 @@ func (b *BackuperFile) backupFile(ctx context.Context, root *os.Root, path, dstF
 		defer closeFile(ctx, destination, "gzip")
 
 		if err != nil {
-			return fmt.Errorf("create gzip writer error: %w", err)
+			return fmt.Errorf("create gzip writer: %w", err)
 		}
 	}
 
 	if _, err = io.Copy(destination, source); err != nil {
-		return fmt.Errorf("create backup file error: %w", err)
+		return fmt.Errorf("create backup file: %w", err)
 	}
 
 	return nil
@@ -135,7 +135,7 @@ func (b *BackuperFile) deleteOldBackups(ctx context.Context, directory string) e
 	// find all files with prefix
 	allFiles, err := filepath.Glob(prefix)
 	if err != nil {
-		return fmt.Errorf("find old backups (%q) for delete error: %w", prefix, err)
+		return fmt.Errorf("find old backups (%q) for delete: %w", prefix, err)
 	}
 
 	groups := groupFilesByPrefix(allFiles)
@@ -147,7 +147,7 @@ func (b *BackuperFile) deleteOldBackups(ctx context.Context, directory string) e
 			slog.DebugContext(ctx, "filebackup: delete old backup", "path", fname)
 
 			if err := os.Remove(fname); err != nil {
-				return fmt.Errorf("remove error: %w", err)
+				return fmt.Errorf("remove: %w", err)
 			}
 		}
 	}
@@ -259,12 +259,12 @@ func ensureBackupDirExists(ctx context.Context, root *os.Root, backupDir string)
 	// create backup dir if not exists
 	if _, err := root.Stat(backupDir); os.IsNotExist(err) {
 		if err := root.Mkdir(backupDir, dirPerm); err != nil {
-			return fmt.Errorf("create backup dir error: %w", err)
+			return fmt.Errorf("create backup dir: %w", err)
 		}
 
 		slog.InfoContext(ctx, fmt.Sprintf("filebackup: created backup dir %s in %s", backupDir, root.Name()))
 	} else if err != nil {
-		return fmt.Errorf("stat backup dir error: %w", err)
+		return fmt.Errorf("stat backup dir: %w", err)
 	}
 
 	return nil

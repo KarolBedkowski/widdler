@@ -149,14 +149,14 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, path st
 		slog.InfoContext(ctx, "server: creating empty wiki", "root", u.root)
 
 		if err := createEmpty(ctx, u.root, path); err != nil {
-			return fmt.Errorf("create empty wiki error: %w", err)
+			return fmt.Errorf("create empty wiki: %w", err)
 		}
 	case err != nil:
-		return fmt.Errorf("check file %q error: %w", path, err)
+		return fmt.Errorf("check file %q: %w", path, err)
 	case r.Method == http.MethodPut:
 		// no error, file exists, make backup on put
 		if err := u.b.create(ctx, u.root, u.user, path); err != nil {
-			return fmt.Errorf("create backup error: %w", err)
+			return fmt.Errorf("create backup: %w", err)
 		}
 	}
 
@@ -179,24 +179,24 @@ func createEmpty(ctx context.Context, root *os.Root, path string) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, emptyURL, http.NoBody)
 	if err != nil {
-		return fmt.Errorf("download %s error: %w", emptyURL, err)
+		return fmt.Errorf("download %s: %w", emptyURL, err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil || resp == nil {
-		return fmt.Errorf("download %s error: %w", emptyURL, err)
+		return fmt.Errorf("download %s: %w", emptyURL, err)
 	}
 
 	defer resp.Body.Close()
 
 	out, err := root.OpenFile(path, os.O_RDWR|os.O_CREATE, filePerm)
 	if err != nil {
-		return fmt.Errorf("open output file error: %w", err)
+		return fmt.Errorf("open output file: %w", err)
 	}
 	defer out.Close()
 
 	if _, err := io.Copy(out, resp.Body); err != nil {
-		return fmt.Errorf("write error: %w", err)
+		return fmt.Errorf("write: %w", err)
 	}
 
 	slog.InfoContext(ctx, "server: create empty wiki completed")
@@ -246,7 +246,7 @@ func (m *MultiUserHandler) loadUsers(davDir, htpassPath string, backuper *Backup
 
 	p, err := os.Open(htpassPath)
 	if err != nil {
-		return fmt.Errorf("open users file %q error: %w", htpassPath, err)
+		return fmt.Errorf("open users file %q: %w", htpassPath, err)
 	}
 
 	defer p.Close()
@@ -258,7 +258,7 @@ func (m *MultiUserHandler) loadUsers(davDir, htpassPath string, backuper *Backup
 
 	entries, err := ht.ReadAll()
 	if err != nil {
-		return fmt.Errorf("read users from %q error: %w", htpassPath, err)
+		return fmt.Errorf("read users from %q: %w", htpassPath, err)
 	}
 
 	m.handlers = make(map[string]*userHandler, len(entries))
@@ -270,7 +270,7 @@ func (m *MultiUserHandler) loadUsers(davDir, htpassPath string, backuper *Backup
 
 		homedir := filepath.Clean(path.Join(davDir, parts[0]))
 		if err := ensureHomeExists(homedir); err != nil {
-			return fmt.Errorf("ensure home %q for user %q error: %w", parts[0], homedir, err)
+			return fmt.Errorf("ensure home %q for user %q: %w", parts[0], homedir, err)
 		}
 
 		m.handlers[parts[0]] = newUserHandler(parts[0], parts[1], homedir, backuper)
@@ -293,7 +293,7 @@ func ensureHomeExists(home string) error {
 			return fmt.Errorf("make home eror: %w", err)
 		}
 	default:
-		return fmt.Errorf("check home error: %w", err)
+		return fmt.Errorf("check home: %w", err)
 	}
 
 	return nil
@@ -333,7 +333,7 @@ func (c *Server) Validate() error {
 
 	c.davDir, err = filepath.Abs(c.davDir)
 	if err != nil {
-		return fmt.Errorf("invalid wikis dir %q; error: %w", c.davDir, err)
+		return fmt.Errorf("invalid wikis dir %q;: %w", c.davDir, err)
 	}
 
 	if c.authMethod != AuthNone && c.authMethod != AuthBasic {
@@ -363,7 +363,7 @@ func (c *Server) Start(ctx context.Context, backuper *Backuper) error {
 
 	lis, err := lconfig.Listen(ctx, "tcp", c.listen)
 	if err != nil {
-		return fmt.Errorf("start listen error: %w", err)
+		return fmt.Errorf("start listen: %w", err)
 	}
 
 	backuper.start(ctx, users)
@@ -415,7 +415,7 @@ func (c *Server) setupHandlers(backuper *Backuper) (http.Handler, []string, erro
 
 	m := &MultiUserHandler{auth: c.authMethod} //nolint:exhaustruct
 	if err := m.loadUsers(c.davDir, c.htpassPath, backuper); err != nil {
-		return nil, nil, fmt.Errorf("load users error: %w", err)
+		return nil, nil, fmt.Errorf("load users: %w", err)
 	}
 
 	return m, slices.Collect(maps.Keys(m.handlers)), nil
