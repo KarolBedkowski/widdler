@@ -37,6 +37,12 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpa
 }
 
 func (u *userHandler) handleNewFile(w http.ResponseWriter, r *http.Request, reqpath string) error {
+	if !validateContentType(r, "application/x-www-form-urlencoded") {
+		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
+
+		return nil
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024) //nolint:mnd // 1k
 	filename := r.FormValue("filename")
 	filename = filepath.Base(filename)

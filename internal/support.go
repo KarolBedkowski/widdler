@@ -2,6 +2,7 @@ package internal
 
 import (
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -61,4 +62,17 @@ func isValidFilename(name string) bool {
 	}
 
 	return true
+}
+
+func validateContentType(r *http.Request, contentType ...string) bool {
+	if r.ContentLength == 0 {
+		return true
+	}
+
+	ct := strings.Split(r.Header.Get("Content-Type"), ";")
+	if len(ct) == 0 || ct[0] == "" {
+		return false
+	}
+
+	return slices.Contains(contentType, ct[0])
 }

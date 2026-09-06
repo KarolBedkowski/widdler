@@ -154,7 +154,12 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, path st
 		}
 	}
 
-	u.dav.ServeHTTP(w, r)
+	// require text/html content type
+	if !validateContentType(r, "text/html") {
+		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
+	} else {
+		u.dav.ServeHTTP(w, r)
+	}
 
 	return nil
 }

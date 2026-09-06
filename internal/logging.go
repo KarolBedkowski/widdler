@@ -104,6 +104,7 @@ func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"path", r.URL.Path,
 		"proto", r.Proto,
 		"request_size", r.ContentLength,
+		"content_type", r.Header.Get("Content-Type"),
 	)
 
 	lrw := logResponseWriter{ResponseWriter: w, status: 0, size: 0}
