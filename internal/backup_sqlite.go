@@ -800,7 +800,7 @@ func getFileFromDb(ctx context.Context, conn *sql.Conn, backupid int64) (*Sqlite
 	result, oks := dmp.PatchApply(patches, string(parentContent))
 	for i, ok := range oks {
 		if !ok {
-			return nil, fmt.Errorf("failed to apply patch %d (%q): %w", i, patches[i], err)
+			return nil, fmt.Errorf("failed to apply patch %d (%v): %w", i, patches[i], err)
 		}
 	}
 

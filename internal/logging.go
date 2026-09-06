@@ -33,7 +33,7 @@ func setupLogging(level, format string) {
 
 	switch logFormat {
 	case "tint":
-		handler = tint.NewHandler(colorable.NewColorable(os.Stderr), &tint.Options{ //nolint:exhaustruct
+		handler = tint.NewTextHandler(colorable.NewColorable(os.Stderr), &tint.Options{ //nolint:exhaustruct
 			AddSource:  true,
 			Level:      parseLevel(level),
 			NoColor:    !isatty,

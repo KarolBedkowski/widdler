@@ -1,20 +1,20 @@
 module gitlab.com/kabes/widdler-ex
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/lmittmann/tint v1.2.0
 	github.com/mattn/go-colorable v0.1.15
-	github.com/mattn/go-isatty v0.0.23
+	github.com/mattn/go-isatty v0.0.24
 	github.com/rs/xid v1.6.0
 	github.com/sergi/go-diff v1.4.0
-	github.com/urfave/cli/v3 v3.10.1
+	github.com/urfave/cli/v3 v3.11.0
 	github.com/valyala/quicktemplate v1.8.0
 	github.com/veqryn/slog-context v0.9.0
-	golang.org/x/crypto v0.54.0
-	golang.org/x/net v0.57.0
+	golang.org/x/crypto v0.56.0
+	golang.org/x/net v0.58.0
 	golang.org/x/term v0.45.0
-	modernc.org/sqlite v1.54.0
+	modernc.org/sqlite v1.58.0
 )
 
 require (
@@ -25,7 +25,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	modernc.org/libc v1.74.3 // indirect
+	modernc.org/libc v1.75.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.11.0 // indirect
+	modernc.org/memory v1.12.1 // indirect
 )

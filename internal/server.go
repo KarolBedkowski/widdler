@@ -387,8 +387,7 @@ func (c *Server) startHTTPS(ctx context.Context, srv *http.Server, lis net.Liste
 			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
 			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
 		},
-		CurvePreferences:         []tls.CurveID{tls.X25519, tls.CurveP521, tls.CurveP384, tls.CurveP256},
-		PreferServerCipherSuites: true,
+		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP521, tls.CurveP384, tls.CurveP256},
 	}
 
 	if err := srv.ServeTLS(lis, c.tlsCert, c.tlsKey); err != nil {
