@@ -95,14 +95,14 @@ func (b *BackuperFile) backupFile(ctx context.Context, root *os.Root, path, dstF
 		// already exists; skip
 		return nil
 	} else if !os.IsNotExist(err) {
-		return errors.Wrap(err, "stat backup destination")
+		return errors.WithMessage(err, "stat backup destination")
 	}
 
 	slog.DebugContext(ctx, "filebackup: backup file", "src", path, "dst", dstFilename)
 
 	source, err := root.Open(path)
 	if err != nil {
-		return errors.Wrap(err, "open file for backup")
+		return errors.WithMessage(err, "open file for backup")
 	}
 	defer closeFile(ctx, source, path)
 
@@ -110,7 +110,7 @@ func (b *BackuperFile) backupFile(ctx context.Context, root *os.Root, path, dstF
 
 	destination, err = root.Create(dstFilename)
 	if err != nil {
-		return errors.Wrap(err, "create backup file")
+		return errors.WithMessage(err, "create backup file")
 	}
 	defer closeFile(ctx, destination, dstFilename)
 
@@ -119,12 +119,12 @@ func (b *BackuperFile) backupFile(ctx context.Context, root *os.Root, path, dstF
 		defer closeFile(ctx, destination, "gzip")
 
 		if err != nil {
-			return errors.Wrap(err, "create gzip writer")
+			return errors.WithMessage(err, "create gzip writer")
 		}
 	}
 
 	if _, err = io.Copy(destination, source); err != nil {
-		return errors.Wrap(err, "create backup")
+		return errors.WithMessage(err, "create backup")
 	}
 
 	return nil
@@ -136,7 +136,7 @@ func (b *BackuperFile) deleteOldBackups(ctx context.Context, directory string) e
 	// find all files with prefix
 	allFiles, err := filepath.Glob(prefix)
 	if err != nil {
-		return errors.Wrapf(err, "find old backups (%q) for delete", prefix)
+		return errors.WithMessagef(err, "find old backups (%q) for delete", prefix)
 	}
 
 	groups := groupFilesByPrefix(allFiles)
@@ -148,7 +148,7 @@ func (b *BackuperFile) deleteOldBackups(ctx context.Context, directory string) e
 			slog.DebugContext(ctx, "filebackup: delete old backup", "path", fname)
 
 			if err := os.Remove(fname); err != nil {
-				return errors.Wrap(err, "remove")
+				return errors.WithMessage(err, "remove")
 			}
 		}
 	}
@@ -166,13 +166,13 @@ func (b *BackuperFile) loadPolicy(policy string) error {
 
 	b.keepDaily, err = strconv.Atoi(fields[0])
 	if err != nil {
-		return errors.Wrapf(err, "invalid policy value %q", fields[0])
+		return errors.WithMessagef(err, "invalid policy value %q", fields[0])
 	}
 
 	if len(fields) > 1 {
 		b.keepOnWrite, err = strconv.Atoi(fields[1])
 		if err != nil {
-			return errors.Wrapf(err, "invalid policy value %q", fields[1])
+			return errors.WithMessagef(err, "invalid policy value %q", fields[1])
 		}
 	}
 
@@ -260,12 +260,12 @@ func ensureBackupDirExists(ctx context.Context, root *os.Root, backupDir string)
 	// create backup dir if not exists
 	if _, err := root.Stat(backupDir); os.IsNotExist(err) {
 		if err := root.Mkdir(backupDir, dirPerm); err != nil {
-			return errors.Wrap(err, "create backup dir")
+			return errors.WithMessage(err, "create backup dir")
 		}
 
 		slog.InfoContext(ctx, fmt.Sprintf("filebackup: created backup dir %s in %s", backupDir, root.Name()))
 	} else if err != nil {
-		return errors.Wrap(err, "stat backup dir")
+		return errors.WithMessage(err, "stat backup dir")
 	}
 
 	return nil

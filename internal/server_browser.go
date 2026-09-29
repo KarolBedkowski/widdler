@@ -25,7 +25,7 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpa
 
 	content, err := u.getDirContent(r.Context(), reqpath)
 	if err != nil {
-		return errors.Wrap(err, "read dir content: %w")
+		return WithPublic(errors.WithMessage(err, "read dir content"), "Internal error: can read wikis directory")
 	}
 
 	w.Header().Add("Cache-Control", "no-cache")
@@ -71,7 +71,7 @@ func (u *userHandler) getDirContent(ctx context.Context, reqpath string) (DirCon
 
 	entries, err := rdfs.ReadDir(reqpath)
 	if err != nil {
-		return DirContent{}, errors.Wrap(err, "read dir")
+		return DirContent{}, errors.WithMessage(err, "read dir")
 	}
 
 	files := make([]fs.DirEntry, 0, len(entries))

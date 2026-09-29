@@ -9,7 +9,6 @@ package internal
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -78,7 +77,7 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 
 		return backuper, nil
 	default:
-		return backuper, fmt.Errorf("unknown backup mode %q", backuper.mode) //nolint:err113
+		return backuper, errors.Errorf("unknown backup mode %q", backuper.mode) //nolint:err113
 	}
 
 	slog.InfoContext(ctx, "backups: backup enabled", "backup_mode", backuper.mode)
@@ -113,7 +112,7 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 			return nil
 		}
 
-		return errors.Wrap(err, "stat file")
+		return errors.WithMessage(err, "stat file")
 	}
 
 	filekey := user + "|" + root.Name() + "|" + srcFilePath

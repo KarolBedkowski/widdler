@@ -5,8 +5,6 @@ import (
 	"crypto/tls"
 	"embed"
 	"encoding/csv"
-	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"maps"
@@ -22,6 +20,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 	slogctx "github.com/veqryn/slog-context"
+	"gitlab.com/tozd/go/errors"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/net/webdav"
 )
@@ -114,7 +113,7 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case !errors.Is(err, ErrNotFound):
 		slog.ErrorContext(ctx, "server: handle html error", "path", resolvedPath, "err", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		renderInternalError(w, err)
 
 		return
 	}
@@ -126,7 +125,7 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 	case err != nil:
 		slog.ErrorContext(ctx, "server: handle browse error", "path", resolvedPath, "err", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		renderInternalError(w, err)
 	}
 }
 
@@ -149,14 +148,16 @@ func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, path st
 		slog.InfoContext(ctx, "server: creating empty wiki", "root", u.root)
 
 		if err := createEmpty(ctx, u.root, path); err != nil {
-			return fmt.Errorf("create empty wiki: %w", err)
+			return WithPublic(errors.WithMessage(err, "create empty wiki"),
+				"Internal error: failed create empty wiki")
 		}
 	case err != nil:
-		return fmt.Errorf("check file %q: %w", path, err)
+		return errors.WithMessagef(err, "check file %q", path)
 	case r.Method == http.MethodPut:
 		// no error, file exists, make backup on put
 		if err := u.b.create(ctx, u.root, u.user, path); err != nil {
-			return fmt.Errorf("create backup: %w", err)
+			return WithPublic(errors.WithMessage(err, "create backup"),
+				"Internal error: failed create backup")
 		}
 	}
 
@@ -179,24 +180,24 @@ func createEmpty(ctx context.Context, root *os.Root, path string) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, emptyURL, http.NoBody)
 	if err != nil {
-		return fmt.Errorf("download %s: %w", emptyURL, err)
+		return errors.WithMessage(err, "download %s", emptyURL)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil || resp == nil {
-		return fmt.Errorf("download %s: %w", emptyURL, err)
+		return errors.WithMessage(err, "download %s", emptyURL)
 	}
 
 	defer resp.Body.Close()
 
 	out, err := root.OpenFile(path, os.O_RDWR|os.O_CREATE, filePerm)
 	if err != nil {
-		return fmt.Errorf("open output file: %w", err)
+		return errors.WithMessage(err, "open output file")
 	}
 	defer out.Close()
 
 	if _, err := io.Copy(out, resp.Body); err != nil {
-		return fmt.Errorf("write: %w", err)
+		return errors.WithMessage(err, "write")
 	}
 
 	slog.InfoContext(ctx, "server: create empty wiki completed")
@@ -246,7 +247,7 @@ func (m *MultiUserHandler) loadUsers(davDir, htpassPath string, backuper *Backup
 
 	p, err := os.Open(htpassPath)
 	if err != nil {
-		return fmt.Errorf("open users file %q: %w", htpassPath, err)
+		return errors.WithMessagef(err, "open users file %q", htpassPath)
 	}
 
 	defer p.Close()
@@ -258,7 +259,7 @@ func (m *MultiUserHandler) loadUsers(davDir, htpassPath string, backuper *Backup
 
 	entries, err := ht.ReadAll()
 	if err != nil {
-		return fmt.Errorf("read users from %q: %w", htpassPath, err)
+		return errors.WithMessagef(err, "read users from %q", htpassPath)
 	}
 
 	m.handlers = make(map[string]*userHandler, len(entries))
@@ -270,7 +271,7 @@ func (m *MultiUserHandler) loadUsers(davDir, htpassPath string, backuper *Backup
 
 		homedir := filepath.Clean(path.Join(davDir, parts[0]))
 		if err := ensureHomeExists(homedir); err != nil {
-			return fmt.Errorf("ensure home %q for user %q: %w", parts[0], homedir, err)
+			return errors.WithMessage(err, "ensure home %q for user %q", parts[0], homedir)
 		}
 
 		m.handlers[parts[0]] = newUserHandler(parts[0], parts[1], homedir, backuper)
@@ -290,10 +291,10 @@ func ensureHomeExists(home string) error {
 		slog.Info("creating home dir", "home", home)
 
 		if err := os.Mkdir(home, homeDirPerm); err != nil {
-			return fmt.Errorf("make home eror: %w", err)
+			return errors.WithMessage(err, "make home ")
 		}
 	default:
-		return fmt.Errorf("check home: %w", err)
+		return errors.WithMessage(err, "check home")
 	}
 
 	return nil
@@ -333,7 +334,7 @@ func (c *Server) Validate() error {
 
 	c.davDir, err = filepath.Abs(c.davDir)
 	if err != nil {
-		return fmt.Errorf("invalid wikis dir %q;: %w", c.davDir, err)
+		return errors.WithMessagef(err, "invalid wikis dir %q", c.davDir)
 	}
 
 	if c.authMethod != AuthNone && c.authMethod != AuthBasic {
@@ -363,7 +364,7 @@ func (c *Server) Start(ctx context.Context, backuper *Backuper) error {
 
 	lis, err := lconfig.Listen(ctx, "tcp", c.listen)
 	if err != nil {
-		return fmt.Errorf("start listen: %w", err)
+		return errors.WithMessage(err, "start listen")
 	}
 
 	backuper.start(ctx, users)
@@ -379,7 +380,7 @@ func (c *Server) startHTTP(ctx context.Context, srv *http.Server, lis net.Listen
 	slog.InfoContext(ctx, "server: listening on '"+c.listen+"' (http)")
 
 	if err := srv.Serve(lis); err != nil {
-		return fmt.Errorf("serve http failed: %w", err)
+		return errors.WithMessage(err, "serve http")
 	}
 
 	return nil
@@ -402,7 +403,7 @@ func (c *Server) startHTTPS(ctx context.Context, srv *http.Server, lis net.Liste
 	}
 
 	if err := srv.ServeTLS(lis, c.tlsCert, c.tlsKey); err != nil {
-		return fmt.Errorf("serve https failed failed: %w", err)
+		return errors.WithMessage(err, "serve https")
 	}
 
 	return nil
@@ -415,8 +416,17 @@ func (c *Server) setupHandlers(backuper *Backuper) (http.Handler, []string, erro
 
 	m := &MultiUserHandler{auth: c.authMethod} //nolint:exhaustruct
 	if err := m.loadUsers(c.davDir, c.htpassPath, backuper); err != nil {
-		return nil, nil, fmt.Errorf("load users: %w", err)
+		return nil, nil, errors.WithMessage(err, "load users")
 	}
 
 	return m, slices.Collect(maps.Keys(m.handlers)), nil
+}
+
+func renderInternalError(w http.ResponseWriter, err error) {
+	msg, _ := errors.AllDetails(err)["public"].(string)
+	if msg == "" {
+		msg = http.StatusText(http.StatusInternalServerError)
+	}
+
+	http.Error(w, msg, http.StatusInternalServerError)
 }

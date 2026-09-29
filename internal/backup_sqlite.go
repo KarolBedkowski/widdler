@@ -46,7 +46,7 @@ var _ BackupHandler = &BackuperSqlite{} //nolint:exhaustruct
 func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress bool) (*BackuperSqlite, error) {
 	db, err := sql.Open("sqlite", dbfilename)
 	if err != nil {
-		return nil, errors.Wrap(err, "open database file")
+		return nil, errors.WithMessage(err, "open database file")
 	}
 
 	db.SetConnMaxLifetime(60) //nolint:mnd
@@ -59,7 +59,7 @@ func newBackuperSqlite(ctx context.Context, dbfilename, policy string, compress 
 			content BLOB);
 		CREATE INDEX IF NOT EXISTS backups_idx ON backups (username, filename, isfull, ts);`)
 	if err != nil {
-		return nil, errors.Wrap(err, "execute initial sql")
+		return nil, errors.WithMessage(err, "execute initial sql")
 	}
 
 	backuper := &BackuperSqlite{
@@ -88,7 +88,7 @@ func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, fi
 
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
-		return errors.Wrap(err, "begin tx")
+		return errors.WithMessage(err, "begin tx")
 	}
 
 	defer tx.Rollback() //nolint:errcheck
@@ -131,7 +131,7 @@ func (b *BackuperSqlite) Create(ctx context.Context, root *os.Root, username, fi
 	}
 
 	if err := tx.Commit(); err != nil {
-		return errors.Wrap(err, "commit changes")
+		return errors.WithMessage(err, "commit changes")
 	}
 
 	slog.DebugContext(ctx, "sqlitebackup: backup created ", "full_backup", isfull, "backup_size", len(newContentB))
@@ -161,7 +161,7 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 
 		tx, err := b.db.BeginTx(lctx, nil)
 		if err != nil {
-			return errors.Wrap(err, "begin tx")
+			return errors.WithMessage(err, "begin tx")
 		}
 
 		if b.numIncrBackups > 0 {
@@ -181,12 +181,12 @@ func (b *BackuperSqlite) Clean(ctx context.Context, users []string) error { //no
 		}
 
 		if err := tx.Commit(); err != nil {
-			return errors.Wrap(err, "commit")
+			return errors.WithMessage(err, "commit")
 		}
 	}
 
 	if _, err := b.db.ExecContext(ctx, "VACUUM; PRAGMA optimize;"); err != nil {
-		return errors.Wrap(err, "run vacuum")
+		return errors.WithMessage(err, "run vacuum")
 	}
 
 	return nil
@@ -344,7 +344,7 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 func (b *BackuperSqlite) getConnection(ctx context.Context) (*sql.Conn, error) {
 	conn, err := b.db.Conn(ctx)
 	if err != nil {
-		return nil, errors.Wrap(err, "open db connection")
+		return nil, errors.WithMessage(err, "open db connection")
 	}
 
 	_, err = conn.ExecContext(ctx, `
@@ -356,7 +356,7 @@ PRAGMA temp_store = MEMORY;
 	if err != nil {
 		conn.Close()
 
-		return nil, errors.Wrap(err, "run db init conn script")
+		return nil, errors.WithMessage(err, "run db init conn script")
 	}
 
 	return conn, nil
@@ -372,7 +372,7 @@ func (b *BackuperSqlite) getUsersFiles(ctx context.Context) ([]UserFile, error) 
 
 	rows, err := b.db.QueryContext(ctx, "SELECT DISTINCT username, filename FROM BACKUPS")
 	if err != nil {
-		return nil, errors.Wrap(err, "get users files")
+		return nil, errors.WithMessage(err, "get users files")
 	}
 
 	defer rows.Close()
@@ -381,14 +381,14 @@ func (b *BackuperSqlite) getUsersFiles(ctx context.Context) ([]UserFile, error) 
 		uf := UserFile{} //nolint:exhaustruct
 
 		if err := rows.Scan(&uf.Username, &uf.Filename); err != nil {
-			return nil, errors.Wrap(err, "scan user files")
+			return nil, errors.WithMessage(err, "scan user files")
 		}
 
 		usersfiles = append(usersfiles, uf)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, errors.Wrap(err, "get users files")
+		return nil, errors.WithMessage(err, "get users files")
 	}
 
 	return usersfiles, nil
@@ -406,7 +406,7 @@ func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user
 
 		return nil
 	} else if err != nil {
-		return errors.Wrapf(err, "clean incr backup for user %q file %q", user, file)
+		return errors.WithMessagef(err, "clean incr backup for user %q file %q", user, file)
 	}
 
 	slog.DebugContext(ctx, "sqlitebackup: delete incr backups", "min_id", backupid.Int64)
@@ -414,7 +414,7 @@ func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user
 	res, err := tx.ExecContext(ctx, "DELETE FROM backups WHERE username=? AND filename=? AND isfull=0 and id<?",
 		user, file, backupid)
 	if err != nil {
-		return errors.Wrapf(err, "clean incr backup for user %q file %q", user, file)
+		return errors.WithMessagef(err, "clean incr backup for user %q file %q", user, file)
 	}
 
 	count, _ := res.RowsAffected()
@@ -436,7 +436,7 @@ func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user
 
 		return nil
 	} else if err != nil {
-		return errors.Wrapf(err, "clean full backup for user %q file %q", user, file)
+		return errors.WithMessagef(err, "clean full backup for user %q file %q", user, file)
 	}
 
 	slog.DebugContext(ctx, "sqlitebackup: delete full backups", "min_id", backupid.Int64)
@@ -446,7 +446,7 @@ func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user
 			" AND NOT EXISTS (SELECT NULL FROM backups b2 WHERE b2.parent = b.id) ",
 		user, file, backupid)
 	if err != nil {
-		return errors.Wrapf(err, "clean full backup for user %q file %q", user, file)
+		return errors.WithMessagef(err, "clean full backup for user %q file %q", user, file)
 	}
 
 	count, _ := res.RowsAffected()
@@ -475,7 +475,10 @@ func (b *BackuperSqlite) loadPolicy(policy string) error { //nolint:cyclop
 		}
 
 		if b.numFullBackups <= 0 {
-			return fmt.Errorf("invalid policy value for number of full backups %q - must be greater than 0", fields[0])
+			return errors.Errorf(
+				"invalid policy value for number of full backups %q - must be greater than 0",
+				fields[0],
+			)
 		}
 	}
 
@@ -486,8 +489,10 @@ func (b *BackuperSqlite) loadPolicy(policy string) error { //nolint:cyclop
 		}
 
 		if b.numIncrBackups < 0 {
-			return fmt.Errorf("invalid policy value for number of incremental backups %q - must be greater or equal 0",
-				fields[1])
+			return errors.Errorf(
+				"invalid policy value for number of incremental backups %q - must be greater or equal 0",
+				fields[1],
+			)
 		}
 	}
 
@@ -498,7 +503,7 @@ func (b *BackuperSqlite) loadPolicy(policy string) error { //nolint:cyclop
 		}
 
 		if b.maxFullBackupAge < 0 {
-			return fmt.Errorf( //nolint:err113
+			return errors.Errorf( //nolint:err113
 				"invalid policy value for full backup interval %q; must be greater than 0", fields[2],
 			)
 		}
@@ -530,7 +535,7 @@ func (b *BackuperSqlite) getPrevContent(ctx context.Context, tx *sql.Tx, usernam
 	if errors.Is(err, sql.ErrNoRows) || len(content) == 0 {
 		return "", 0, nil
 	} else if err != nil {
-		return "", 0, errors.Wrap(err, "get last full content")
+		return "", 0, errors.WithMessage(err, "get last full content")
 	}
 
 	if compressed == 1 {
@@ -583,7 +588,7 @@ func (b *BackuperSqlite) storeContent(
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		username, file, time.Now().Unix(), storefull, content, compressed, parentBackup)
 	if err != nil {
-		return errors.Wrap(err, "insert new content")
+		return errors.WithMessage(err, "insert new content")
 	}
 
 	return nil
@@ -598,7 +603,7 @@ func (*BackuperSqlite) compressContent(content []byte) ([]byte, error) {
 	zw.Close()
 
 	if err != nil {
-		return nil, errors.Wrap(err, "compress content")
+		return nil, errors.WithMessage(err, "compress content")
 	}
 
 	return buf.Bytes(), nil
@@ -616,7 +621,7 @@ func decompressContent(content []byte) ([]byte, error) {
 	zr.Close()
 
 	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, errors.Wrap(err, "decompress content")
+		return nil, errors.WithMessage(err, "decompress content")
 	}
 
 	return bufout.Bytes(), nil
@@ -647,14 +652,14 @@ func (s SqliteBackup) ToString() string {
 func ListSqliteBackups(ctx context.Context, dbfilename, username string) ([]SqliteBackup, error) {
 	db, err := sql.Open("sqlite", dbfilename)
 	if err != nil {
-		return nil, errors.Wrap(err, "open database file")
+		return nil, errors.WithMessage(err, "open database file")
 	}
 
 	defer db.Close()
 
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return nil, errors.Wrap(err, "open db connection")
+		return nil, errors.WithMessage(err, "open db connection")
 	}
 
 	defer conn.Close()
@@ -678,7 +683,7 @@ func listSqliteBackups(ctx context.Context, conn *sql.Conn, username string) ([]
 	}
 
 	if err != nil {
-		return nil, errors.Wrap(err, "query backups")
+		return nil, errors.WithMessage(err, "query backups")
 	}
 
 	defer rows.Close()
@@ -691,7 +696,7 @@ func listSqliteBackups(ctx context.Context, conn *sql.Conn, username string) ([]
 		var ts, isfull int64
 
 		if err := rows.Scan(&sb.ID, &sb.Username, &ts, &sb.Filename, &isfull); err != nil {
-			return nil, errors.Wrap(err, "scan")
+			return nil, errors.WithMessage(err, "scan")
 		}
 
 		sb.IsFull = isfull > 0
@@ -701,7 +706,7 @@ func listSqliteBackups(ctx context.Context, conn *sql.Conn, username string) ([]
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, errors.Wrap(err, "query backups")
+		return nil, errors.WithMessage(err, "query backups")
 	}
 
 	return backups, nil
@@ -716,14 +721,14 @@ func RestoreSqliteBackup(
 ) ([]byte, error) {
 	db, err := sql.Open("sqlite", dbfilename)
 	if err != nil {
-		return nil, errors.Wrap(err, "open database file")
+		return nil, errors.WithMessage(err, "open database file")
 	}
 
 	defer db.Close()
 
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return nil, errors.Wrap(err, "open db connection")
+		return nil, errors.WithMessage(err, "open db connection")
 	}
 
 	defer conn.Close()
@@ -795,13 +800,13 @@ func getFileFromDb(ctx context.Context, conn *sql.Conn, backupid int64) (*Sqlite
 
 	patches, err := dmp.PatchFromText(string(content))
 	if err != nil {
-		return nil, errors.Wrap(err, "path from content")
+		return nil, errors.WithMessage(err, "path from content")
 	}
 
 	result, oks := dmp.PatchApply(patches, string(parentContent))
 	for i, ok := range oks {
 		if !ok {
-			return nil, errors.Wrapf(err, "apply patch %d (%v)", i, patches[i])
+			return nil, errors.WithMessagef(err, "apply patch %d (%v)", i, patches[i])
 		}
 	}
 
