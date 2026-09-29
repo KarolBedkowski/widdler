@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -45,7 +47,7 @@ func setupLogging(level, format string) {
 		handler = slog.NewTextHandler(os.Stdout, opts)
 	}
 
-	handler = slogctx.NewHandler(handler, nil)
+	handler = slogctx.NewHandler(NewFormatterHandler(handler), nil)
 
 	slog.SetDefault(slog.New(handler))
 }
@@ -131,4 +133,92 @@ func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	l.next.ServeHTTP(&lrw, r)
+}
+
+// ----------------------------------------------------------------------------
+
+func SlogErrAttr(err error) slog.Attr {
+	return slog.Any("err", SlogErrValue(err))
+}
+
+func SlogErrValue(err error) slog.Value {
+	attrs := []slog.Attr{
+		slog.String("error", err.Error()),
+	}
+
+	if d := errors.AllDetails(err); len(d) > 0 {
+		dattrs := make([]slog.Attr, 0, len(d))
+		for k, v := range d {
+			dattrs = append(dattrs, slog.Any(k, v))
+		}
+
+		attrs = append(attrs, slog.GroupAttrs("details", dattrs...))
+	}
+
+	if c := errors.Cause(err); c != nil {
+		attrs = append(attrs, slog.Any("cause", c))
+	}
+
+	if e, ok := errors.AsType[errors.E](err); ok {
+		attrs = append(attrs, slog.String("stack", fmt.Sprintf("% +-v", e)))
+	}
+
+	return slog.GroupValue(attrs...)
+}
+
+// ----------------------------------------------------------------------------
+
+// ErrorFormatterHandler format fields with error type.
+type ErrorFormatterHandler struct {
+	handler slog.Handler
+}
+
+// NewFormatterHandler returns a slog.Handler that applies formatters to.
+func NewFormatterHandler(handler slog.Handler) slog.Handler {
+	return &ErrorFormatterHandler{
+		handler: handler,
+	}
+}
+
+// Enabled implements slog.Handler.
+func (h *ErrorFormatterHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	return h.handler.Enabled(ctx, l)
+}
+
+// Handle implements slog.Handler.
+func (h *ErrorFormatterHandler) Handle(ctx context.Context, r slog.Record) error {
+	r2 := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
+	r.Attrs(func(attr slog.Attr) bool {
+		r2.AddAttrs(h.transform(attr))
+
+		return true
+	})
+
+	return h.handler.Handle(ctx, r2) //nolint:wrapcheck
+}
+
+// WithAttrs implements slog.Handler.
+func (h *ErrorFormatterHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	for i := range attrs {
+		h.transform(attrs[i])
+	}
+
+	return &ErrorFormatterHandler{
+		handler: h.handler.WithAttrs(attrs),
+	}
+}
+
+// WithGroup implements slog.Handler.
+func (h *ErrorFormatterHandler) WithGroup(name string) slog.Handler {
+	return &ErrorFormatterHandler{
+		handler: h.handler.WithGroup(name),
+	}
+}
+
+func (h *ErrorFormatterHandler) transform(attr slog.Attr) slog.Attr {
+	if err, ok := attr.Value.Any().(error); ok {
+		attr.Value = SlogErrValue(err)
+	}
+
+	return attr
 }
