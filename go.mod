@@ -11,6 +11,7 @@ require (
 	github.com/urfave/cli/v3 v3.11.0
 	github.com/valyala/quicktemplate v1.8.0
 	github.com/veqryn/slog-context v0.9.0
+	gitlab.com/tozd/go/errors v0.11.1
 	golang.org/x/crypto v0.56.0
 	golang.org/x/net v0.58.0
 	golang.org/x/term v0.45.0
@@ -22,6 +23,7 @@ require (
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect

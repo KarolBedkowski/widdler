@@ -2,13 +2,13 @@ package internal
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"log/slog"
 	"os"
 
 	"github.com/urfave/cli/v3"
+	"gitlab.com/tozd/go/errors"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 )
@@ -195,7 +195,7 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if err := server.Start(ctx, &backuper); err != nil {
-		return fmt.Errorf("serve: %w", err)
+		return errors.Wrap(err, "serve start")
 	}
 
 	return nil
@@ -258,12 +258,12 @@ func prompt(prompt string, secure bool) (string, error) {
 	if secure {
 		b, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
-			return "", fmt.Errorf("read password: %w", err)
+			return "", errors.Wrap(err, "read password")
 		}
 
 		input = string(b)
 	} else if _, err := fmt.Scanln(&input); err != nil {
-		return "", fmt.Errorf("read stdin: %w", err)
+		return "", errors.Wrap(err, "read stdin")
 	}
 
 	if input == "" {
@@ -279,32 +279,32 @@ func mainGenPass(ctx context.Context, cmd *cli.Command) error {
 
 	user, err := prompt("Username: ", false)
 	if err != nil {
-		return fmt.Errorf("get username: %w", err)
+		return errors.Wrap(err, "get username")
 	}
 
 	pass, err := prompt("Password: ", true)
 	if err != nil {
-		return fmt.Errorf("get password: %w", err)
+		return errors.Wrap(err, "get password")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(pass), 11) //nolint:mnd
 	if err != nil {
-		return fmt.Errorf("hash password: %w", err)
+		return errors.Wrap(err, "hash password")
 	}
 
 	const filePerm = 0o600
 
 	f, err := os.OpenFile(passPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
 	if err != nil {
-		return fmt.Errorf("open passfile: %w", err)
+		return errors.Wrap(err, "open passfile")
 	}
 
 	if _, err := fmt.Fprintf(f, "%s:%s\n", user, hash); err != nil {
-		return fmt.Errorf("write to passfile: %w", err)
+		return errors.Wrap(err, "write to passfile")
 	}
 
 	if err = f.Close(); err != nil {
-		return fmt.Errorf("close passfile: %w", err)
+		return errors.Wrap(err, "close passfile")
 	}
 
 	fmt.Printf("Added %q to %q\n", user, passPath)
@@ -322,10 +322,10 @@ func ensureWikisHomeExists(dir string) error {
 		slog.Info("creating wikis home dir " + dir)
 
 		if err := os.Mkdir(dir, dirPerm); err != nil {
-			return fmt.Errorf("create wikis dir: %w", err)
+			return errors.Wrap(err, "create wikis dir")
 		}
 	} else if err != nil {
-		return fmt.Errorf("stat wikis dir: %w", err)
+		return errors.Wrap(err, "stat wikis dir")
 	}
 
 	return nil

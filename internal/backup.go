@@ -17,6 +17,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 	slogctx "github.com/veqryn/slog-context"
+	"gitlab.com/tozd/go/errors"
 )
 
 const cleanTaskInterval = 3600 // sec
@@ -62,14 +63,14 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 		backuper.handler, err = newBackuperFile(cmd.String("wikis"), cmd.String("backup.dir"),
 			cmd.String("backup.policy"), cmd.Bool("backup.compress"))
 		if err != nil {
-			return backuper, fmt.Errorf("prepare file backup failed: %w", err)
+			return backuper, errors.WithMessage(err, "prepare file backup")
 		}
 
 	case backupModeSqlite:
 		backuper.handler, err = newBackuperSqlite(ctx, cmd.String("backup.sqlite_file"),
 			cmd.String("backup.policy"), cmd.Bool("backup.compress"))
 		if err != nil {
-			return backuper, fmt.Errorf("create sqlite backup failed: %w", err)
+			return backuper, errors.WithMessage(err, "create sqlite backup")
 		}
 
 	case "":
@@ -112,7 +113,7 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 			return nil
 		}
 
-		return fmt.Errorf("stat file: %w", err)
+		return errors.Wrap(err, "stat file")
 	}
 
 	filekey := user + "|" + root.Name() + "|" + srcFilePath
@@ -123,7 +124,7 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 	}
 
 	if err := b.handler.Create(ctx, root, user, srcFilePath); err != nil {
-		return fmt.Errorf("create backup failed: %w", err)
+		return errors.WithMessage(err, "create backup")
 	}
 
 	// store backup time

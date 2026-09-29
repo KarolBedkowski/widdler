@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/rs/xid"
 	slogctx "github.com/veqryn/slog-context"
+	"gitlab.com/tozd/go/errors"
 )
 
 func setupLogging(level, format string) {
@@ -77,7 +77,7 @@ func (r *logResponseWriter) Write(b []byte) (int, error) {
 	r.size += size                         // capture size
 
 	if err != nil {
-		return size, fmt.Errorf("write response: %w", err)
+		return size, errors.Wrap(err, "write response")
 	}
 
 	return size, nil

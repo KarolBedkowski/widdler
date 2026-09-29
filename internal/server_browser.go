@@ -9,12 +9,13 @@ package internal
 
 import (
 	"context"
-	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
+
+	"gitlab.com/tozd/go/errors"
 )
 
 func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpath string) error {
@@ -24,7 +25,7 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpa
 
 	content, err := u.getDirContent(r.Context(), reqpath)
 	if err != nil {
-		return fmt.Errorf("read dir content: %w", err)
+		return errors.Wrap(err, "read dir content: %w")
 	}
 
 	w.Header().Add("Cache-Control", "no-cache")
@@ -70,7 +71,7 @@ func (u *userHandler) getDirContent(ctx context.Context, reqpath string) (DirCon
 
 	entries, err := rdfs.ReadDir(reqpath)
 	if err != nil {
-		return DirContent{}, fmt.Errorf("read dir: %w", err)
+		return DirContent{}, errors.Wrap(err, "read dir")
 	}
 
 	files := make([]fs.DirEntry, 0, len(entries))
