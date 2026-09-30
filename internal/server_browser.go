@@ -18,7 +18,7 @@ import (
 	"gitlab.com/tozd/go/errors"
 )
 
-func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpath string) error {
+func (u *userHomeHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpath string) error {
 	if r.Method == http.MethodPost {
 		return u.handleNewFile(w, r, reqpath)
 	}
@@ -37,7 +37,7 @@ func (u *userHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpa
 	return nil
 }
 
-func (u *userHandler) handleNewFile(w http.ResponseWriter, r *http.Request, reqpath string) error {
+func (u *userHomeHandler) handleNewFile(w http.ResponseWriter, r *http.Request, reqpath string) error {
 	if !validateContentType(r, "application/x-www-form-urlencoded") {
 		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 
@@ -65,7 +65,7 @@ func (u *userHandler) handleNewFile(w http.ResponseWriter, r *http.Request, reqp
 	return nil
 }
 
-func (u *userHandler) getDirContent(ctx context.Context, reqpath string) (DirContent, error) {
+func (u *userHomeHandler) getDirContent(ctx context.Context, reqpath string) (DirContent, error) {
 	_ = ctx
 	rdfs, _ := u.root.FS().(fs.ReadDirFS)
 

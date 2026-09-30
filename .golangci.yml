@@ -12,8 +12,6 @@ linters:
     - testpackage
     - wsl
     - noinlineerr
-    - err113
-    - forbidigo
     - gomodguard
     - exhaustruct
     - exhaustruct_v5

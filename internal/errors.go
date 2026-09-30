@@ -1,13 +1,17 @@
 package internal
 
-import "fmt"
-
 //
 // errors.go
 // Copyright (C) 2026 Karol Będkowski <Karol Będkowski@kkomp>
 //
 // Distributed under terms of the GPLv3 license.
 //
+
+import (
+	"fmt"
+
+	"gitlab.com/tozd/go/errors"
+)
 
 type withPublicError struct {
 	err error
@@ -32,3 +36,13 @@ func WithPublic(err error, msg string, args ...any) error {
 		msg: fmt.Sprintf(msg, args...),
 	}
 }
+
+func Public(err error) string {
+	msg, _ := errors.AllDetails(err)["public"].(string)
+
+	return msg
+}
+
+//------------------------------------------------------------------------------
+
+var ErrNotFound = errors.New("not found")

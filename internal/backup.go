@@ -69,7 +69,7 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 		backuper.handler, err = newBackuperSqlite(ctx, cmd.String("backup.sqlite_file"),
 			cmd.String("backup.policy"), cmd.Bool("backup.compress"))
 		if err != nil {
-			return backuper, errors.WithMessage(err, "create sqlite backup")
+			return backuper, errors.WithMessage(err, "prepare sqlite backup")
 		}
 
 	case "":
@@ -77,7 +77,7 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 
 		return backuper, nil
 	default:
-		return backuper, errors.Errorf("unknown backup mode %q", backuper.mode) //nolint:err113
+		return backuper, errors.Errorf("unknown backup mode %q", backuper.mode)
 	}
 
 	slog.InfoContext(ctx, "backups: backup enabled", "backup_mode", backuper.mode)

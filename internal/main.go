@@ -3,7 +3,6 @@ package internal
 import (
 	"context"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 
@@ -170,7 +169,15 @@ func Main() { //nolint:funlen
 	}
 
 	if err := cmd.Run(context.Background(), os.Args); err != nil {
-		log.Fatal(err)
+		slog.Error("run failed", "err", err)
+
+		if pub := Public(err); pub != "" {
+			fmt.Fprintf(os.Stdout, "Error: %s", pub)
+		} else {
+			fmt.Fprintf(os.Stdout, "Error: %s", err.Error())
+		}
+
+		os.Exit(1)
 	}
 }
 
@@ -183,7 +190,7 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if err := ensureWikisHomeExists(server.davDir); err != nil {
-		return err
+		return errors.WithDetails(err, "dir", server.davDir)
 	}
 
 	slog.Info("Wikis directory: " + server.davDir)
@@ -191,7 +198,7 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 
 	backuper, err := newBackuper(ctx, cmd)
 	if err != nil {
-		return err
+		return errors.WithMessage(err, "initiate backup")
 	}
 
 	if err := server.Start(ctx, &backuper); err != nil {
@@ -206,7 +213,7 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 func listSqliteBackupsCmd(ctx context.Context, cmd *cli.Command) error {
 	dbfilename := cmd.String("file")
 	if dbfilename == "" {
-		return errors.New("missing database filename") //nolint:err113
+		return errors.New("missing database filename")
 	}
 
 	username := cmd.String("username")
@@ -216,10 +223,10 @@ func listSqliteBackupsCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	fmt.Printf("%4s | %-10s | %-30s | %-20s | %s\n", "ID", "User name", "Date time", "File name", "Kind")
+	fmt.Fprintf(os.Stdout, "%4s | %-10s | %-30s | %-20s | %s\n", "ID", "User name", "Date time", "File name", "Kind")
 
 	for _, r := range res {
-		fmt.Println(r.ToString())
+		fmt.Fprintln(os.Stdout, r.ToString())
 	}
 
 	return nil
@@ -230,20 +237,20 @@ func listSqliteBackupsCmd(ctx context.Context, cmd *cli.Command) error {
 func restoreSqliteBackups(ctx context.Context, cmd *cli.Command) error {
 	dbfilename := cmd.String("file")
 	if dbfilename == "" {
-		return errors.New("missing database filename") //nolint:err113
+		return errors.New("missing database filename")
 	}
 
 	backupid := cmd.Int64("backupid")
 	if backupid <= 0 {
-		return errors.New("missing or invalid backupid") //nolint:err113
+		return errors.New("missing or invalid backupid")
 	}
 
 	res, err := RestoreSqliteBackup(ctx, dbfilename, backupid)
 	if err != nil {
-		return err
+		return errors.WithMessage(err, "restore")
 	}
 
-	fmt.Println(string(res))
+	fmt.Fprintln(os.Stdout, string(res))
 
 	return nil
 }
@@ -251,7 +258,7 @@ func restoreSqliteBackups(ctx context.Context, cmd *cli.Command) error {
 // -------------------------------------------------------------------
 
 func prompt(prompt string, secure bool) (string, error) {
-	fmt.Print(prompt)
+	fmt.Fprint(os.Stdout, prompt)
 
 	var input string
 
@@ -267,7 +274,7 @@ func prompt(prompt string, secure bool) (string, error) {
 	}
 
 	if input == "" {
-		return "", errors.Errorf("empty %q", prompt) //nolint:err113
+		return "", errors.New("no data entered")
 	}
 
 	return input, nil
@@ -275,16 +282,20 @@ func prompt(prompt string, secure bool) (string, error) {
 
 func mainGenPass(ctx context.Context, cmd *cli.Command) error {
 	_ = ctx
+
 	passPath := cmd.String("htpass")
+	if passPath == "" {
+		return errors.New("missing htpass")
+	}
 
 	user, err := prompt("Username: ", false)
 	if err != nil {
-		return errors.WithMessage(err, "get username")
+		return errors.WithMessage(err, "prompt username")
 	}
 
 	pass, err := prompt("Password: ", true)
 	if err != nil {
-		return errors.WithMessage(err, "get password")
+		return errors.WithMessage(err, "prompt password")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(pass), 11) //nolint:mnd
@@ -307,7 +318,7 @@ func mainGenPass(ctx context.Context, cmd *cli.Command) error {
 		return errors.WithMessage(err, "close passfile")
 	}
 
-	fmt.Printf("Added %q to %q\n", user, passPath)
+	fmt.Fprintf(os.Stdout, "Added %q to %q\n", user, passPath)
 
 	return nil
 }

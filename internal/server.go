@@ -42,7 +42,7 @@ var staticFS embed.FS
 
 // -------------------------------------------------------------------
 
-type userHandler struct {
+type userHomeHandler struct {
 	fs   http.Handler
 	b    *Backuper
 	dav  *webdav.Handler
@@ -55,13 +55,13 @@ type userHandler struct {
 	mu   sync.Mutex
 }
 
-func newUserHandler(user, pass, homedir string, backuper *Backuper) *userHandler {
+func newUserHandler(user, pass, homedir string, backuper *Backuper) (*userHomeHandler, error) {
 	slog.Debug("new user handler", "user", user, "homedir", homedir)
 
 	root, err := os.OpenRoot(homedir)
 	if err != nil {
-		slog.Error("server: open home dir failed", "user", user, "homedir", homedir, "err", err)
-		os.Exit(1)
+		return nil, errors.WithDetails(errors.WithMessage(err, "open user home dir"),
+			"user", user, "homedir", homedir)
 	}
 
 	dav := &webdav.Handler{ //nolint:exhaustruct
@@ -74,7 +74,7 @@ func newUserHandler(user, pass, homedir string, backuper *Backuper) *userHandler
 		},
 	}
 
-	return &userHandler{ //nolint:exhaustruct
+	return &userHomeHandler{ //nolint:exhaustruct
 		b:    backuper,
 		user: user,
 		pass: pass,
@@ -82,10 +82,10 @@ func newUserHandler(user, pass, homedir string, backuper *Backuper) *userHandler
 		root: root,
 		dav:  dav,
 		fs:   http.FileServerFS(root.FS()),
-	}
+	}, nil
 }
 
-func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (u *userHomeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -129,13 +129,11 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (u *userHandler) authenticate(pass string) bool {
+func (u *userHomeHandler) authenticate(pass string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(u.pass), []byte(pass)) == nil
 }
 
-var ErrNotFound = errors.New("not found")
-
-func (u *userHandler) handleHTML(w http.ResponseWriter, r *http.Request, path string) error {
+func (u *userHomeHandler) handleHTML(w http.ResponseWriter, r *http.Request, path string) error {
 	if ext := filepath.Ext(r.URL.Path); ext != ".html" && ext != ".htm" {
 		return ErrNotFound
 	}
@@ -207,7 +205,7 @@ func createEmpty(ctx context.Context, root *os.Root, path string) error {
 
 // -------------------------------------------------------------------
 
-type userHandlers map[string]*userHandler
+type userHandlers map[string]*userHomeHandler
 
 type MultiUserHandler struct {
 	handlers userHandlers
@@ -242,7 +240,7 @@ func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (m *MultiUserHandler) loadUsers(davDir, htpassPath string, backuper *Backuper) error {
 	if _, fErr := os.Stat(htpassPath); os.IsNotExist(fErr) {
-		return errors.New("no password file found") //nolint:err113
+		return errors.New("no password file found")
 	}
 
 	p, err := os.Open(htpassPath)
@@ -262,7 +260,7 @@ func (m *MultiUserHandler) loadUsers(davDir, htpassPath string, backuper *Backup
 		return errors.WithMessagef(err, "read users from %q", htpassPath)
 	}
 
-	m.handlers = make(map[string]*userHandler, len(entries))
+	m.handlers = make(map[string]*userHomeHandler, len(entries))
 
 	for _, parts := range entries {
 		if parts[0] == "" || parts[1] == "" { // skip entries with empty user and/or password
@@ -274,7 +272,12 @@ func (m *MultiUserHandler) loadUsers(davDir, htpassPath string, backuper *Backup
 			return errors.WithMessage(err, "ensure home %q for user %q", parts[0], homedir)
 		}
 
-		m.handlers[parts[0]] = newUserHandler(parts[0], parts[1], homedir, backuper)
+		h, err := newUserHandler(parts[0], parts[1], homedir, backuper)
+		if err != nil {
+			return errors.WithMessage(err, "prepare handler for user %q", parts[0])
+		}
+
+		m.handlers[parts[0]] = h
 	}
 
 	return nil
@@ -338,7 +341,7 @@ func (c *Server) Validate() error {
 	}
 
 	if c.authMethod != AuthNone && c.authMethod != AuthBasic {
-		return errors.New("invalid auth type") //nolint:err113
+		return errors.New("invalid auth type")
 	}
 
 	return nil
@@ -411,7 +414,12 @@ func (c *Server) startHTTPS(ctx context.Context, srv *http.Server, lis net.Liste
 
 func (c *Server) setupHandlers(backuper *Backuper) (http.Handler, []string, error) {
 	if c.authMethod == AuthNone {
-		return newUserHandler("", "", c.davDir, backuper), nil, nil
+		h, err := newUserHandler("", "", c.davDir, backuper)
+		if err != nil {
+			return nil, nil, errors.WithMessage(err, "prepare handler")
+		}
+
+		return h, nil, nil
 	}
 
 	m := &MultiUserHandler{auth: c.authMethod} //nolint:exhaustruct
@@ -423,7 +431,7 @@ func (c *Server) setupHandlers(backuper *Backuper) (http.Handler, []string, erro
 }
 
 func renderInternalError(w http.ResponseWriter, err error) {
-	msg, _ := errors.AllDetails(err)["public"].(string)
+	msg := Public(err)
 	if msg == "" {
 		msg = http.StatusText(http.StatusInternalServerError)
 	}

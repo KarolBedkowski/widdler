@@ -48,7 +48,7 @@ func newBackuperFile(basedir, backupdir, policy string, compress bool) (*Backupe
 
 	if policy != "" {
 		if err := backuper.loadPolicy(policy); err != nil {
-			return nil, err
+			return nil, errors.WithMessage(err, "load policy")
 		}
 	}
 

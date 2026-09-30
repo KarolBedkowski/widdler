@@ -503,7 +503,7 @@ func (b *BackuperSqlite) loadPolicy(policy string) error { //nolint:cyclop
 		}
 
 		if b.maxFullBackupAge < 0 {
-			return errors.Errorf( //nolint:err113
+			return errors.Errorf(
 				"invalid policy value for full backup interval %q; must be greater than 0", fields[2],
 			)
 		}
