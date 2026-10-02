@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"embed"
 	"encoding/csv"
+	"fmt"
 	"io"
 	"log/slog"
 	"maps"
@@ -113,7 +114,7 @@ func (u *userHomeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case !errors.Is(err, ErrNotFound):
 		slog.ErrorContext(ctx, "server: handle html error", "path", resolvedPath, "err", err)
-		renderInternalError(w, err)
+		renderError(w, http.StatusInternalServerError, err)
 
 		return
 	}
@@ -121,11 +122,18 @@ func (u *userHomeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Everything else is browsable
 	switch err := u.handleBrowse(w, r, resolvedPath); {
 	case errors.Is(err, ErrNotFound):
-		slog.ErrorContext(ctx, "server: handle browse error - not found", "path", resolvedPath, "err", err)
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		slog.InfoContext(
+			ctx,
+			"server: handle browse error - not found",
+			"path",
+			resolvedPath,
+			"err",
+			SlogStrippedErrValue(err),
+		)
+		renderError(w, http.StatusNotFound, nil)
 	case err != nil:
 		slog.ErrorContext(ctx, "server: handle browse error", "path", resolvedPath, "err", err)
-		renderInternalError(w, err)
+		renderError(w, http.StatusInternalServerError, err)
 	}
 }
 
@@ -430,11 +438,40 @@ func (c *Server) setupHandlers(backuper *Backuper) (http.Handler, []string, erro
 	return m, slices.Collect(maps.Keys(m.handlers)), nil
 }
 
-func renderInternalError(w http.ResponseWriter, err error) {
-	msg := Public(err)
-	if msg == "" {
-		msg = http.StatusText(http.StatusInternalServerError)
+func renderError(w http.ResponseWriter, status int, err error) {
+	var msg string
+	if err != nil {
+		msg = Public(err)
 	}
 
-	http.Error(w, msg, http.StatusInternalServerError)
+	if msg == "" {
+		msg = http.StatusText(status)
+	}
+
+	h := w.Header()
+	h.Set("Content-Type", "text/plain; charset=utf-8")
+	h.Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+
+	fmt.Fprintln(w, msg)
+
+	if !devmode || err == nil {
+		return
+	}
+
+	fmt.Fprint(w, "\n\n----------\n\n")
+
+	fmt.Fprintln(w, err.Error())
+
+	for k, v := range errors.AllDetails(err) {
+		fmt.Fprintf(w, "    %s: %v\n", k, v)
+	}
+
+	if c := errors.Cause(err); c != nil {
+		fmt.Fprintf(w, "cause: %#+v\n", c)
+	}
+
+	if e, ok := errors.AsType[errors.E](err); ok {
+		fmt.Fprintf(w, "\nStack:\n% +-v", e)
+	}
 }

@@ -141,6 +141,39 @@ func SlogErrAttr(err error) slog.Attr {
 	return slog.Any("err", SlogErrValue(err))
 }
 
+func SlogStrippedErrAttr(err error) slog.Attr {
+	return slog.Any("err", SlogStrippedErrValue(err))
+}
+
+func SlogStrippedErrValue(err error) slog.Value {
+	if err == nil {
+		return slog.Value{}
+	}
+
+	attrs := []slog.Attr{
+		slog.String("error", err.Error()),
+	}
+
+	if d := errors.AllDetails(err); len(d) > 0 {
+		dattrs := make([]slog.Attr, 0, len(d))
+		for k, v := range d {
+			dattrs = append(dattrs, slog.Any(k, v))
+		}
+
+		attrs = append(attrs, slog.GroupAttrs("details", dattrs...))
+	}
+
+	if c := errors.Cause(err); c != nil {
+		attrs = append(attrs, slog.Any("cause", c))
+	}
+
+	if e, ok := errors.AsType[errors.E](err); ok {
+		attrs = append(attrs, slog.String("stack", fmt.Sprintf("%v", e)))
+	}
+
+	return slog.GroupValue(attrs...)
+}
+
 func SlogErrValue(err error) slog.Value {
 	attrs := []slog.Attr{
 		slog.String("error", err.Error()),

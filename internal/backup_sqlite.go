@@ -232,7 +232,7 @@ func (b *BackuperSqlite) ListHandler(ctx context.Context, w http.ResponseWriter,
 	case "restore":
 		b.restoreBackupHandler(ctx, w, r, root, user, backupid)
 	default:
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		renderError(w, http.StatusNotFound, nil)
 	}
 
 	return true
@@ -242,7 +242,7 @@ func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.Response
 	conn, err := b.getConnection(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "sqlitebackup: failed to get db connection", "err", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		renderError(w, http.StatusInternalServerError, err)
 
 		return
 	}
@@ -250,7 +250,7 @@ func (b *BackuperSqlite) listBackupsHandler(ctx context.Context, w http.Response
 	backups, err := listSqliteBackups(ctx, conn, user)
 	if err != nil {
 		slog.ErrorContext(ctx, "sqlitebackup: failed to get backups", "err", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		renderError(w, http.StatusInternalServerError, err)
 
 		return
 	}
@@ -266,7 +266,7 @@ func (b *BackuperSqlite) viewBackupHandler(ctx context.Context, w http.ResponseW
 	conn, err := b.getConnection(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "sqlitebackup: get db connection failed", "err", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		renderError(w, http.StatusInternalServerError, err)
 
 		return
 	}
@@ -276,14 +276,14 @@ func (b *BackuperSqlite) viewBackupHandler(ctx context.Context, w http.ResponseW
 	data, err := getFileFromDb(ctx, conn, backupid)
 	switch {
 	case errors.Is(err, ErrNotFound):
-		slog.ErrorContext(ctx, "sqlitebackup: get file form db connection failed", "err", err)
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		slog.InfoContext(ctx, "sqlitebackup: get file form db connection failed", "err", SlogStrippedErrValue(err))
+		renderError(w, http.StatusNotFound, nil)
 	case err != nil:
 		slog.ErrorContext(ctx, "sqlitebackup: get file form db connection failed", "err", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		renderError(w, http.StatusInternalServerError, err)
 	case data.Username != user:
 		slog.ErrorContext(ctx, "sqlitebackup: invalid user", "backup.user", data.Username, "user", user)
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		renderError(w, http.StatusNotFound, nil)
 	default:
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(data.Data)
@@ -296,7 +296,7 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 	conn, err := b.getConnection(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "sqlitebackup: get db connection failed", "err", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		renderError(w, http.StatusInternalServerError, err)
 
 		return
 	}
@@ -309,14 +309,14 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 	data, err := getFileFromDb(ctx, conn, backupid)
 	switch {
 	case errors.Is(err, ErrNotFound):
-		slog.ErrorContext(ctx, "sqlitebackup: get file form db connection failed", "err", err)
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		slog.InfoContext(ctx, "sqlitebackup: get file form db connection failed", "err", SlogStrippedErrValue(err))
+		renderError(w, http.StatusNotFound, nil)
 	case err != nil:
 		slog.ErrorContext(ctx, "sqlitebackup: get file form db connection failed", "err", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		renderError(w, http.StatusInternalServerError, err)
 	case data.Username != user:
 		slog.ErrorContext(ctx, "sqlitebackup: invalid user", "backup.user", data.Username, "user", user)
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		renderError(w, http.StatusNotFound, nil)
 	case r.Method == http.MethodPost && fname != "":
 		if !isValidFilename(fname) {
 			http.Error(w, http.StatusText(http.StatusBadRequest)+" - invalid filename", http.StatusBadRequest)
@@ -328,7 +328,7 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 
 		if err := root.WriteFile(fname, data.Data, 0o660); err != nil { //nolint:mnd
 			slog.ErrorContext(ctx, "write file error", "backup.filename", data.Filename, "err", err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 
 			return
 		}

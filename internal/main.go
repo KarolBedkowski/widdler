@@ -14,7 +14,10 @@ import (
 
 // -------------------------------------------------------------------
 
-var build = "dev"
+var (
+	build   = "dev"
+	devmode = false
+)
 
 const (
 	DefaultBackupFilename = "backup.sqlite"
@@ -44,6 +47,12 @@ func Main() { //nolint:funlen
 				Usage:    "The output format of log messages. One of: [logfmt, json, tint]",
 				Category: "Logging",
 				Sources:  cli.EnvVars("WIDDLEREX_LOG_FORMAT"),
+			},
+			&cli.BoolFlag{
+				Name:    "devmode",
+				Value:   false,
+				Hidden:  true,
+				Sources: cli.EnvVars("WIDDLEREX_DEVMODE"),
 			},
 		},
 		Commands: []*cli.Command{
@@ -163,6 +172,7 @@ func Main() { //nolint:funlen
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			setupLogging(cmd.String("log.level"), cmd.String("log.format"))
+			devmode = cmd.Bool("devmode")
 
 			return ctx, nil
 		},
