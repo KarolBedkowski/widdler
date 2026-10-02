@@ -9,6 +9,7 @@ package internal
 
 import (
 	"fmt"
+	"os"
 
 	"gitlab.com/tozd/go/errors"
 )
@@ -45,4 +46,4 @@ func Public(err error) string {
 
 //------------------------------------------------------------------------------
 
-var ErrNotFound = errors.New("not found")
+var ErrNotFound = os.ErrNotExist
