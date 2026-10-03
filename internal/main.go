@@ -2,7 +2,6 @@ package internal
 
 import (
 	"context"
-	"encoding/csv"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -219,7 +218,7 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.WithMessage(err, "invalid configuration")
 	}
 
-	if err := ensureWikisHomeExists(config.WikisDir); err != nil {
+	if err := ensureDirExists(config.WikisDir); err != nil {
 		return errors.WithMessagef(err, "wikis dir %q check error", config.WikisDir)
 	}
 
@@ -381,65 +380,6 @@ func mainGenPass(ctx context.Context, cmd *cli.Command) error {
 	fmt.Fprintf(os.Stdout, "Added %q to %q\n", user, passPath)
 
 	return nil
-}
-
-// -------------------------------------------------------------------
-
-func ensureWikisHomeExists(dir string) error {
-	const dirPerm = 0o700
-
-	// create backup dir if not exists
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		slog.Info("creating wikis home dir " + dir)
-
-		if err := os.Mkdir(dir, dirPerm); err != nil {
-			return errors.WithMessage(err, "create wikis dir")
-		}
-	} else if err != nil {
-		return errors.WithMessage(err, "stat wikis dir")
-	}
-
-	return nil
-}
-
-// -------------------------------------------------------------------
-
-func loadUsers(authmethod, htpassPath string) (map[string]string, error) {
-	if authmethod == AuthNone {
-		slog.Info("auth disabled")
-
-		return nil, nil //nolint:nilnil
-	}
-
-	slog.Debug("loading passfile", "htpass", htpassPath, "auth", authmethod)
-
-	p, err := os.Open(htpassPath)
-	if err != nil {
-		return nil, errors.WithMessagef(err, "open users file %q", htpassPath)
-	}
-	defer p.Close()
-
-	ht := csv.NewReader(p)
-	ht.Comma = ':'
-	ht.Comment = '#'
-	ht.TrimLeadingSpace = true
-
-	entries, err := ht.ReadAll()
-	if err != nil {
-		return nil, errors.WithMessagef(err, "read users from %q", htpassPath)
-	}
-
-	users := make(map[string]string)
-
-	for _, parts := range entries {
-		if parts[0] == "" || parts[1] == "" { // skip entries with empty user and/or password
-			continue
-		}
-
-		users[parts[0]] = parts[1]
-	}
-
-	return users, nil
 }
 
 // -------------------------------------------------------------------

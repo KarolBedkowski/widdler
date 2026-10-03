@@ -35,7 +35,6 @@ var staticFS embed.FS
 // -------------------------------------------------------------------
 
 type userHomeHandler struct {
-	fs   http.Handler
 	b    *Backuper
 	dav  *webdav.Handler
 	root *os.Root
@@ -73,7 +72,6 @@ func newUserHandler(user, pass, homedir string, backuper *Backuper) (*userHomeHa
 		home: homedir,
 		root: root,
 		dav:  dav,
-		fs:   http.FileServerFS(root.FS()),
 	}, nil
 }
 
@@ -144,12 +142,17 @@ func (u *userHomeHandler) handleHTML(w http.ResponseWriter, r *http.Request, pat
 		// file not exists, try create empty
 		slog.InfoContext(ctx, "server: creating empty wiki", "root", u.root)
 
-		if err := createEmpty(ctx, u.root, path); err != nil {
+		if err := createEmptyWiki(ctx, u.root, path); err != nil {
 			return WithPublic(errors.WithMessage(err, "create empty wiki"),
 				"Internal error: failed create empty wiki")
 		}
 	case err != nil:
 		return errors.WithMessagef(err, "check file %q", path)
+	case !validateContentType(r, "text/html"):
+		// require text/html content type
+		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
+
+		return nil
 	case r.Method == http.MethodPut:
 		// no error, file exists, make backup on put
 		if err := u.b.create(ctx, u.root, u.user, path); err != nil {
@@ -158,19 +161,14 @@ func (u *userHomeHandler) handleHTML(w http.ResponseWriter, r *http.Request, pat
 		}
 	}
 
-	// require text/html content type
-	if !validateContentType(r, "text/html") {
-		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
-	} else {
-		u.dav.ServeHTTP(w, r)
-	}
+	u.dav.ServeHTTP(w, r)
 
 	return nil
 }
 
 // -------------------------------------------------------------------
 
-func createEmpty(ctx context.Context, root *os.Root, path string) error {
+func createEmptyWiki(ctx context.Context, root *os.Root, path string) error {
 	const filePerm = 0o600
 
 	slog.InfoContext(ctx, "server: downloading", "url", emptyURL)
@@ -241,7 +239,7 @@ func newMultiUserHandler(basedir string, users map[string]string, backuper *Back
 
 	for user, pass := range users {
 		homedir := filepath.Clean(path.Join(basedir, user))
-		if err := ensureHomeExists(homedir); err != nil {
+		if err := ensureDirExists(homedir); err != nil {
 			return nil, errors.WithMessagef(err, "ensure home %q for user %q", user, homedir)
 		}
 
@@ -262,26 +260,6 @@ func newMultiUserHandler(basedir string, users map[string]string, backuper *Back
 
 // -------------------------------------------------------------------
 
-func ensureHomeExists(home string) error {
-	const homeDirPerm = 0o700
-
-	switch s, err := os.Stat(home); {
-	case err == nil:
-	case s == nil || os.IsNotExist(err):
-		slog.Info("creating home dir", "home", home)
-
-		if err := os.Mkdir(home, homeDirPerm); err != nil {
-			return errors.WithMessage(err, "make home")
-		}
-	default:
-		return errors.WithMessage(err, "check home")
-	}
-
-	return nil
-}
-
-// -------------------------------------------------------------------
-
 type Server struct {
 	cfg      *Config
 	srv      *http.Server
@@ -290,12 +268,31 @@ type Server struct {
 
 func newServer(cfg *Config, users map[string]string, backuper *Backuper) (*Server, error) {
 	server := &Server{cfg: cfg}
-	s, err := server.setupServer(users, backuper)
-	if err != nil {
-		return nil, errors.WithMessage(err, "setup handlers")
+
+	var (
+		handler http.Handler
+		err     error
+	)
+
+	if cfg.Auth == AuthNone {
+		handler, err = newUserHandler("", "", cfg.WikisDir, backuper)
+	} else {
+		handler, err = newMultiUserHandler(cfg.WikisDir, users, backuper)
 	}
 
-	server.srv = s
+	if err != nil {
+		return nil, errors.WithMessage(err, "prepare handler")
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/favicon.ico", http.FileServerFS(staticFS))
+	mux.Handle("/", &Logger{handler})
+
+	server.srv = &http.Server{ //nolint:exhaustruct
+		Handler:           mux,
+		ReadHeaderTimeout: ServerHeaderTimeout,
+		ReadTimeout:       ServerReadTimeout,
+	}
 
 	return server, nil
 }
@@ -305,7 +302,7 @@ func (c *Server) StartListen(ctx context.Context) error {
 
 	lis, err := lconfig.Listen(ctx, "tcp", c.cfg.HTTPListen)
 	if err != nil {
-		return errors.WithMessage(err, "start listen")
+		return errors.WithMessage(err, "listen")
 	}
 
 	c.listener = lis
@@ -315,7 +312,7 @@ func (c *Server) StartListen(ctx context.Context) error {
 
 func (c *Server) Run(ctx context.Context) error {
 	if c.listener == nil {
-		panic("no linstener")
+		panic("no listener")
 	}
 
 	if c.cfg.TLSCert == "" || c.cfg.TLSKey == "" {
@@ -364,35 +361,6 @@ func (c *Server) startHTTPS(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-func (c *Server) setupServer(users map[string]string, backuper *Backuper) (*http.Server, error) {
-	var (
-		handler http.Handler
-		err     error
-	)
-
-	if c.cfg.Auth == AuthNone {
-		handler, err = newUserHandler("", "", c.cfg.WikisDir, backuper)
-	} else {
-		handler, err = newMultiUserHandler(c.cfg.WikisDir, users, backuper)
-	}
-
-	if err != nil {
-		return nil, errors.WithMessage(err, "prepare handler")
-	}
-
-	mux := http.NewServeMux()
-	mux.Handle("/favicon.ico", http.FileServerFS(staticFS))
-	mux.Handle("/", &Logger{handler})
-
-	srv := &http.Server{ //nolint:exhaustruct
-		Handler:           mux,
-		ReadHeaderTimeout: ServerHeaderTimeout,
-		ReadTimeout:       ServerReadTimeout,
-	}
-
-	return srv, nil
 }
 
 // -------------------------------------------------------------------

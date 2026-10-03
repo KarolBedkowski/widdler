@@ -6,6 +6,9 @@ package internal
 // Distributed under terms of the GPLv3 license.
 
 import (
+	"encoding/csv"
+	"log/slog"
+	"os"
 	"path/filepath"
 
 	"github.com/urfave/cli/v3"
@@ -62,4 +65,44 @@ func newConfigFromCmd(cmd *cli.Command) (*Config, error) {
 		BackupDir:      cmd.String("backup.dir"),
 		BackupSqlite:   cmd.String("backup.sqlite_fiel"),
 	}, nil
+}
+
+// -------------------------------------------------------------------
+
+func loadUsers(authmethod, htpassPath string) (map[string]string, error) {
+	if authmethod == AuthNone {
+		slog.Info("auth disabled")
+
+		return nil, nil //nolint:nilnil
+	}
+
+	slog.Debug("loading passfile", "htpass", htpassPath, "auth", authmethod)
+
+	p, err := os.Open(htpassPath)
+	if err != nil {
+		return nil, errors.WithMessagef(err, "open users file %q", htpassPath)
+	}
+	defer p.Close()
+
+	ht := csv.NewReader(p)
+	ht.Comma = ':'
+	ht.Comment = '#'
+	ht.TrimLeadingSpace = true
+
+	entries, err := ht.ReadAll()
+	if err != nil {
+		return nil, errors.WithMessagef(err, "read users from %q", htpassPath)
+	}
+
+	users := make(map[string]string)
+
+	for _, parts := range entries {
+		if parts[0] == "" || parts[1] == "" { // skip entries with empty user and/or password
+			continue
+		}
+
+		users[parts[0]] = parts[1]
+	}
+
+	return users, nil
 }

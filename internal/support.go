@@ -2,10 +2,14 @@ package internal
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"time"
+
+	"gitlab.com/tozd/go/errors"
 )
 
 //
@@ -75,4 +79,23 @@ func validateContentType(r *http.Request, contentType ...string) bool {
 	}
 
 	return slices.Contains(contentType, ct[0])
+}
+
+// -------------------------------------------------------------------
+
+func ensureDirExists(dir string) error {
+	const dirPerm = 0o700
+
+	// create backup dir if not exists
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		slog.Info("creating dir " + dir)
+
+		if err := os.Mkdir(dir, dirPerm); err != nil {
+			return errors.WithMessage(err, "create dir")
+		}
+	} else if err != nil {
+		return errors.WithMessage(err, "stat dir")
+	}
+
+	return nil
 }

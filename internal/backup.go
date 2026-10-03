@@ -178,7 +178,7 @@ func (b *Backuper) handleBackupsPage(
 	root *os.Root,
 	user string,
 ) bool {
-	if !b.enabled {
+	if !b.supportBackupsPage {
 		return false
 	}
 
