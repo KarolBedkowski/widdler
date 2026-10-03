@@ -8,7 +8,6 @@ import (
 	"maps"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"slices"
 	"syscall"
 
@@ -215,26 +214,26 @@ func Main() { //nolint:funlen
 // -------------------------------------------------------------------
 
 func serverCmd(ctx context.Context, cmd *cli.Command) error {
-	if err := ensureWikisHomeExists(cmd.String("wikis")); err != nil {
-		return errors.WithMessagef(err, "wikis dir %q check error", cmd.String("wikis"))
+	config, err := newConfigFromCmd(cmd)
+	if err != nil {
+		return errors.WithMessage(err, "invalid configuration")
 	}
 
-	auth := cmd.String("auth")
-	if auth == "none" {
-		auth = AuthNone
+	if err := ensureWikisHomeExists(config.WikisDir); err != nil {
+		return errors.WithMessagef(err, "wikis dir %q check error", config.WikisDir)
 	}
 
-	users, err := loadUsers(auth, filepath.Clean(cmd.String("htpass")))
+	users, err := loadUsers(config.Auth, config.HTpass)
 	if err != nil {
 		return err
 	}
 
-	backuper, err := newBackuper(ctx, cmd)
+	backuper, err := newBackuper(ctx, config)
 	if err != nil {
 		return errors.WithMessage(err, "initiate backup")
 	}
 
-	server, err := newServer(cmd, users, backuper)
+	server, err := newServer(config, users, backuper)
 	if err != nil {
 		return err
 	}
@@ -407,10 +406,12 @@ func ensureWikisHomeExists(dir string) error {
 
 func loadUsers(authmethod, htpassPath string) (map[string]string, error) {
 	if authmethod == AuthNone {
+		slog.Info("auth disabled")
+
 		return nil, nil //nolint:nilnil
 	}
 
-	slog.Debug("loading passfile", "htpass", htpassPath)
+	slog.Debug("loading passfile", "htpass", htpassPath, "auth", authmethod)
 
 	p, err := os.Open(htpassPath)
 	if err != nil {

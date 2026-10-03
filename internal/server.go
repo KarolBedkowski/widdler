@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/urfave/cli/v3"
 	slogctx "github.com/veqryn/slog-context"
 	"gitlab.com/tozd/go/errors"
 	"golang.org/x/crypto/bcrypt"
@@ -24,11 +23,6 @@ import (
 )
 
 const emptyURL = "https://tiddlywiki.com/empty.html"
-
-const (
-	AuthBasic = "basic"
-	AuthNone  = "none"
-)
 
 const (
 	ServerReadTimeout   = 60 * time.Second
@@ -289,33 +283,13 @@ func ensureHomeExists(home string) error {
 // -------------------------------------------------------------------
 
 type Server struct {
-	authMethod string
-	davDir     string
-	listen     string
-	tlsCert    string
-	tlsKey     string
-	srv        *http.Server
-	listener   net.Listener
+	cfg      *Config
+	srv      *http.Server
+	listener net.Listener
 }
 
-func newServer(cmd *cli.Command, users map[string]string, backuper *Backuper) (*Server, error) {
-	auth := cmd.String("auth")
-	if auth == "" {
-		auth = AuthNone
-	}
-
-	server := &Server{
-		davDir:     cmd.String("wikis"),
-		listen:     cmd.String("http"),
-		tlsCert:    cmd.String("tlscert"),
-		tlsKey:     cmd.String("tlskey"),
-		authMethod: auth,
-	}
-
-	if err := server.validate(); err != nil {
-		return nil, errors.WithMessage(err, "validate")
-	}
-
+func newServer(cfg *Config, users map[string]string, backuper *Backuper) (*Server, error) {
+	server := &Server{cfg: cfg}
 	s, err := server.setupServer(users, backuper)
 	if err != nil {
 		return nil, errors.WithMessage(err, "setup handlers")
@@ -329,7 +303,7 @@ func newServer(cmd *cli.Command, users map[string]string, backuper *Backuper) (*
 func (c *Server) StartListen(ctx context.Context) error {
 	lconfig := &net.ListenConfig{} //nolint:exhaustruct
 
-	lis, err := lconfig.Listen(ctx, "tcp", c.listen)
+	lis, err := lconfig.Listen(ctx, "tcp", c.cfg.HTTPListen)
 	if err != nil {
 		return errors.WithMessage(err, "start listen")
 	}
@@ -344,7 +318,7 @@ func (c *Server) Run(ctx context.Context) error {
 		panic("no linstener")
 	}
 
-	if c.tlsCert == "" || c.tlsKey == "" {
+	if c.cfg.TLSCert == "" || c.cfg.TLSKey == "" {
 		return c.startHTTP(ctx)
 	}
 
@@ -358,7 +332,7 @@ func (c *Server) Stop(error) {
 }
 
 func (c *Server) startHTTP(ctx context.Context) error {
-	slog.InfoContext(ctx, "server: listening on '"+c.listen+"' (http)")
+	slog.InfoContext(ctx, "server: listening on '"+c.cfg.HTTPListen+"' (http)")
 
 	if err := c.srv.Serve(c.listener); err != nil {
 		return errors.WithMessage(err, "serve http")
@@ -370,7 +344,7 @@ func (c *Server) startHTTP(ctx context.Context) error {
 }
 
 func (c *Server) startHTTPS(ctx context.Context) error {
-	slog.InfoContext(ctx, "server: listening on '"+c.listen+"' (https)")
+	slog.InfoContext(ctx, "server: listening on '"+c.cfg.HTTPListen+"' (https)")
 
 	c.srv.TLSConfig = &tls.Config{ //nolint:exhaustruct
 		MinVersion: tls.VersionTLS12,
@@ -385,23 +359,8 @@ func (c *Server) startHTTPS(ctx context.Context) error {
 		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP521, tls.CurveP384, tls.CurveP256},
 	}
 
-	if err := c.srv.ServeTLS(c.listener, c.tlsCert, c.tlsKey); err != nil {
+	if err := c.srv.ServeTLS(c.listener, c.cfg.TLSCert, c.cfg.TLSKey); err != nil {
 		return errors.WithMessage(err, "serve https")
-	}
-
-	return nil
-}
-
-func (c *Server) validate() error {
-	var err error
-
-	c.davDir, err = filepath.Abs(c.davDir)
-	if err != nil {
-		return errors.WithMessagef(err, "invalid wikis dir %q", c.davDir)
-	}
-
-	if c.authMethod != AuthNone && c.authMethod != AuthBasic {
-		return errors.New("invalid auth type")
 	}
 
 	return nil
@@ -413,10 +372,10 @@ func (c *Server) setupServer(users map[string]string, backuper *Backuper) (*http
 		err     error
 	)
 
-	if c.authMethod == AuthNone {
-		handler, err = newUserHandler("", "", c.davDir, backuper)
+	if c.cfg.Auth == AuthNone {
+		handler, err = newUserHandler("", "", c.cfg.WikisDir, backuper)
 	} else {
-		handler, err = newMultiUserHandler(c.davDir, users, backuper)
+		handler, err = newMultiUserHandler(c.cfg.WikisDir, users, backuper)
 	}
 
 	if err != nil {

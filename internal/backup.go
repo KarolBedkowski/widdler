@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/urfave/cli/v3"
 	slogctx "github.com/veqryn/slog-context"
 	"gitlab.com/tozd/go/errors"
 )
@@ -43,34 +42,30 @@ type backupListHandler interface {
 type Backuper struct {
 	handler            BackupHandler
 	backupsAge         map[string]time.Time
-	mode               string
-	interval           int
+	cfg                *Config
 	enabled            bool
 	supportBackupsPage bool
 
 	mu sync.RWMutex
 }
 
-func newBackuper(ctx context.Context, cmd *cli.Command) (*Backuper, error) {
+func newBackuper(ctx context.Context, cfg *Config) (*Backuper, error) {
 	backuper := &Backuper{ //nolint:exhaustruct
-		interval:   cmd.Int("backup.interval"),
-		mode:       cmd.String("backup.mode"),
+		cfg:        cfg,
 		backupsAge: make(map[string]time.Time),
 	}
 
 	var err error
 
-	switch backuper.mode {
+	switch cfg.BackupMode {
 	case backupModeFile:
-		backuper.handler, err = newBackuperFile(cmd.String("wikis"), cmd.String("backup.dir"),
-			cmd.String("backup.policy"), cmd.Bool("backup.compress"))
+		backuper.handler, err = newBackuperFile(cfg.WikisDir, cfg.BackupDir, cfg.BackupPolicy, cfg.BackupCompress)
 		if err != nil {
 			return backuper, errors.WithMessage(err, "prepare file backup")
 		}
 
 	case backupModeSqlite:
-		backuper.handler, err = newBackuperSqlite(ctx, cmd.String("backup.sqlite_file"),
-			cmd.String("backup.policy"), cmd.Bool("backup.compress"))
+		backuper.handler, err = newBackuperSqlite(ctx, cfg.BackupSqlite, cfg.BackupPolicy, cfg.BackupCompress)
 		if err != nil {
 			return backuper, errors.WithMessage(err, "prepare sqlite backup")
 		}
@@ -80,10 +75,10 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (*Backuper, error) {
 
 		return backuper, nil
 	default:
-		return backuper, errors.Errorf("unknown backup mode %q", backuper.mode)
+		return backuper, errors.Errorf("unknown backup mode %q", cfg.BackupMode)
 	}
 
-	slog.InfoContext(ctx, "backups: backup enabled", "backup_mode", backuper.mode)
+	slog.InfoContext(ctx, "backups: backup enabled", "backup_mode", cfg.BackupMode)
 
 	if _, ok := backuper.handler.(backupListHandler); ok {
 		backuper.supportBackupsPage = true
@@ -121,7 +116,7 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 	filekey := user + "|" + root.Name() + "|" + srcFilePath
 
 	// check is need to create backup for given name; if interval=0 always create backup
-	if b.interval > 0 && !b.needBackup(filekey) {
+	if b.cfg.BackupInterval > 0 && !b.needBackup(filekey) {
 		return nil
 	}
 
@@ -148,7 +143,7 @@ func (b *Backuper) needBackup(key string) bool {
 		}
 
 		// skip backup when oldbackup is not older that interval.
-		if time.Since(oldBackupTs) < time.Duration(b.interval)*time.Second {
+		if time.Since(oldBackupTs) < time.Duration(b.cfg.BackupInterval)*time.Second {
 			return false
 		}
 	}
