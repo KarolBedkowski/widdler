@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -46,10 +47,12 @@ type Backuper struct {
 	interval           int
 	enabled            bool
 	supportBackupsPage bool
+
+	mu sync.RWMutex
 }
 
-func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
-	backuper := Backuper{ //nolint:exhaustruct
+func newBackuper(ctx context.Context, cmd *cli.Command) (*Backuper, error) {
+	backuper := &Backuper{ //nolint:exhaustruct
 		interval:   cmd.Int("backup.interval"),
 		mode:       cmd.String("backup.mode"),
 		backupsAge: make(map[string]time.Time),
@@ -91,10 +94,10 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 	return backuper, nil
 }
 
-func (b *Backuper) start(ctx context.Context, users []string) {
-	if b.enabled {
-		go b.cleanWorker(ctx, users)
-	}
+func (b *Backuper) Run(ctx context.Context, users []string) error {
+	b.cleanWorker(ctx, users)
+
+	return nil
 }
 
 // create backup of `srcFilePath` in `root`.
@@ -127,12 +130,17 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 	}
 
 	// store backup time
+	b.mu.Lock()
 	b.backupsAge[filekey] = time.Now()
+	b.mu.Unlock()
 
 	return nil
 }
 
 func (b *Backuper) needBackup(key string) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
 	if oldBackupTs, ok := b.backupsAge[key]; ok {
 		// new day, always create backup
 		if now := time.Now(); oldBackupTs.YearDay() != now.YearDay() || now.Year() != oldBackupTs.Year() {
@@ -156,12 +164,15 @@ func (b *Backuper) cleanWorker(ctx context.Context, users []string) {
 		users = []string{""}
 	}
 
-	for c := time.Tick(cleanTaskInterval * time.Second); ; {
-		if err := b.handler.Clean(ctx, users); err != nil {
-			slog.ErrorContext(ctx, "backups: clean old backups failed", "err", err)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.Tick(cleanTaskInterval * time.Second):
+			if err := b.handler.Clean(ctx, users); err != nil {
+				slog.ErrorContext(ctx, "backups: clean old backups failed", "err", err)
+			}
 		}
-
-		<-c
 	}
 }
 

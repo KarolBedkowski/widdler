@@ -2,11 +2,17 @@ package internal
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"slices"
+	"syscall"
 
+	"github.com/oklog/run"
 	"github.com/urfave/cli/v3"
 	"gitlab.com/tozd/go/errors"
 	"golang.org/x/crypto/bcrypt"
@@ -209,26 +215,56 @@ func Main() { //nolint:funlen
 // -------------------------------------------------------------------
 
 func serverCmd(ctx context.Context, cmd *cli.Command) error {
-	server := newServer(cmd)
-	if err := server.Validate(); err != nil {
+	if err := ensureWikisHomeExists(cmd.String("wikis")); err != nil {
+		return errors.WithMessagef(err, "wikis dir %q check error", cmd.String("wikis"))
+	}
+
+	auth := cmd.String("auth")
+	if auth == "none" {
+		auth = AuthNone
+	}
+
+	users, err := loadUsers(auth, filepath.Clean(cmd.String("htpass")))
+	if err != nil {
 		return err
 	}
-
-	if err := ensureWikisHomeExists(server.davDir); err != nil {
-		return errors.WithDetails(err, "dir", server.davDir)
-	}
-
-	slog.Info("Wikis directory: " + server.davDir)
-	slog.Info("Auth: " + server.authMethod)
 
 	backuper, err := newBackuper(ctx, cmd)
 	if err != nil {
 		return errors.WithMessage(err, "initiate backup")
 	}
 
-	if err := server.Start(ctx, &backuper); err != nil {
-		return errors.WithMessage(err, "serve start")
+	server, err := newServer(cmd, users, backuper)
+	if err != nil {
+		return err
 	}
+
+	if err := server.StartListen(ctx); err != nil {
+		return err
+	}
+
+	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT, syscall.SIGKILL)
+	runGroup := run.Group{}
+
+	if backuper.enabled {
+		usernames := slices.Collect(maps.Keys(users))
+		runGroup.Add(func() error { return backuper.Run(ctx, usernames) }, func(error) {})
+	}
+
+	runGroup.Add(func() error { return server.Run(ctx) }, server.Stop)
+	runGroup.Add(func() error {
+		<-ctx.Done()
+
+		return nil
+	}, func(error) { cancel() })
+
+	slog.InfoContext(ctx, "running")
+
+	if err := runGroup.Run(); err != nil {
+		return errors.WithMessage(err, "run failed")
+	}
+
+	slog.InfoContext(ctx, "stopped")
 
 	return nil
 }
@@ -365,6 +401,44 @@ func ensureWikisHomeExists(dir string) error {
 	}
 
 	return nil
+}
+
+// -------------------------------------------------------------------
+
+func loadUsers(authmethod, htpassPath string) (map[string]string, error) {
+	if authmethod == AuthNone {
+		return nil, nil //nolint:nilnil
+	}
+
+	slog.Debug("loading passfile", "htpass", htpassPath)
+
+	p, err := os.Open(htpassPath)
+	if err != nil {
+		return nil, errors.WithMessagef(err, "open users file %q", htpassPath)
+	}
+	defer p.Close()
+
+	ht := csv.NewReader(p)
+	ht.Comma = ':'
+	ht.Comment = '#'
+	ht.TrimLeadingSpace = true
+
+	entries, err := ht.ReadAll()
+	if err != nil {
+		return nil, errors.WithMessagef(err, "read users from %q", htpassPath)
+	}
+
+	users := make(map[string]string)
+
+	for _, parts := range entries {
+		if parts[0] == "" || parts[1] == "" { // skip entries with empty user and/or password
+			continue
+		}
+
+		users[parts[0]] = parts[1]
+	}
+
+	return users, nil
 }
 
 // -------------------------------------------------------------------

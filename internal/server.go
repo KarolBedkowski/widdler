@@ -4,17 +4,14 @@ import (
 	"context"
 	"crypto/tls"
 	"embed"
-	"encoding/csv"
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"net"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -186,12 +183,12 @@ func createEmpty(ctx context.Context, root *os.Root, path string) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, emptyURL, http.NoBody)
 	if err != nil {
-		return errors.WithMessage(err, "download %s", emptyURL)
+		return errors.WithMessagef(err, "download %s", emptyURL)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil || resp == nil {
-		return errors.WithMessage(err, "download %s", emptyURL)
+		return errors.WithMessagef(err, "download %s", emptyURL)
 	}
 
 	defer resp.Body.Close()
@@ -217,7 +214,6 @@ type userHandlers map[string]*userHomeHandler
 
 type MultiUserHandler struct {
 	handlers userHandlers
-	auth     string
 }
 
 func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -246,49 +242,28 @@ func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 }
 
-func (m *MultiUserHandler) loadUsers(davDir, htpassPath string, backuper *Backuper) error {
-	if _, fErr := os.Stat(htpassPath); os.IsNotExist(fErr) {
-		return errors.New("no password file found")
-	}
+func newMultiUserHandler(basedir string, users map[string]string, backuper *Backuper) (*MultiUserHandler, error) {
+	handlers := make(map[string]*userHomeHandler, len(users))
 
-	p, err := os.Open(htpassPath)
-	if err != nil {
-		return errors.WithMessagef(err, "open users file %q", htpassPath)
-	}
-
-	defer p.Close()
-
-	ht := csv.NewReader(p)
-	ht.Comma = ':'
-	ht.Comment = '#'
-	ht.TrimLeadingSpace = true
-
-	entries, err := ht.ReadAll()
-	if err != nil {
-		return errors.WithMessagef(err, "read users from %q", htpassPath)
-	}
-
-	m.handlers = make(map[string]*userHomeHandler, len(entries))
-
-	for _, parts := range entries {
-		if parts[0] == "" || parts[1] == "" { // skip entries with empty user and/or password
-			continue
-		}
-
-		homedir := filepath.Clean(path.Join(davDir, parts[0]))
+	for user, pass := range users {
+		homedir := filepath.Clean(path.Join(basedir, user))
 		if err := ensureHomeExists(homedir); err != nil {
-			return errors.WithMessage(err, "ensure home %q for user %q", parts[0], homedir)
+			return nil, errors.WithMessagef(err, "ensure home %q for user %q", user, homedir)
 		}
 
-		h, err := newUserHandler(parts[0], parts[1], homedir, backuper)
+		h, err := newUserHandler(user, pass, homedir, backuper)
 		if err != nil {
-			return errors.WithMessage(err, "prepare handler for user %q", parts[0])
+			return nil, errors.WithMessagef(err, "prepare handler for user %q", user)
 		}
 
-		m.handlers[parts[0]] = h
+		handlers[user] = h
 	}
 
-	return nil
+	if len(handlers) == 0 {
+		return nil, errors.New("no user defined in password file")
+	}
+
+	return &MultiUserHandler{handlers: handlers}, nil
 }
 
 // -------------------------------------------------------------------
@@ -302,7 +277,7 @@ func ensureHomeExists(home string) error {
 		slog.Info("creating home dir", "home", home)
 
 		if err := os.Mkdir(home, homeDirPerm); err != nil {
-			return errors.WithMessage(err, "make home ")
+			return errors.WithMessage(err, "make home")
 		}
 	default:
 		return errors.WithMessage(err, "check home")
@@ -317,30 +292,107 @@ type Server struct {
 	authMethod string
 	davDir     string
 	listen     string
-	htpassPath string
 	tlsCert    string
 	tlsKey     string
+	srv        *http.Server
+	listener   net.Listener
 }
 
-func newServer(cmd *cli.Command) Server {
+func newServer(cmd *cli.Command, users map[string]string, backuper *Backuper) (*Server, error) {
 	auth := cmd.String("auth")
-	if auth == "none" {
+	if auth == "" {
 		auth = AuthNone
 	}
 
-	server := Server{
+	server := &Server{
 		davDir:     cmd.String("wikis"),
 		listen:     cmd.String("http"),
 		tlsCert:    cmd.String("tlscert"),
 		tlsKey:     cmd.String("tlskey"),
-		htpassPath: filepath.Clean(cmd.String("htpass")),
 		authMethod: auth,
 	}
 
-	return server
+	if err := server.validate(); err != nil {
+		return nil, errors.WithMessage(err, "validate")
+	}
+
+	s, err := server.setupServer(users, backuper)
+	if err != nil {
+		return nil, errors.WithMessage(err, "setup handlers")
+	}
+
+	server.srv = s
+
+	return server, nil
 }
 
-func (c *Server) Validate() error {
+func (c *Server) StartListen(ctx context.Context) error {
+	lconfig := &net.ListenConfig{} //nolint:exhaustruct
+
+	lis, err := lconfig.Listen(ctx, "tcp", c.listen)
+	if err != nil {
+		return errors.WithMessage(err, "start listen")
+	}
+
+	c.listener = lis
+
+	return nil
+}
+
+func (c *Server) Run(ctx context.Context) error {
+	if c.listener == nil {
+		panic("no linstener")
+	}
+
+	if c.tlsCert == "" || c.tlsKey == "" {
+		return c.startHTTP(ctx)
+	}
+
+	return c.startHTTPS(ctx)
+}
+
+func (c *Server) Stop(error) {
+	if c.listener != nil {
+		c.listener.Close()
+	}
+}
+
+func (c *Server) startHTTP(ctx context.Context) error {
+	slog.InfoContext(ctx, "server: listening on '"+c.listen+"' (http)")
+
+	if err := c.srv.Serve(c.listener); err != nil {
+		return errors.WithMessage(err, "serve http")
+	}
+
+	slog.InfoContext(ctx, "server stopping")
+
+	return nil
+}
+
+func (c *Server) startHTTPS(ctx context.Context) error {
+	slog.InfoContext(ctx, "server: listening on '"+c.listen+"' (https)")
+
+	c.srv.TLSConfig = &tls.Config{ //nolint:exhaustruct
+		MinVersion: tls.VersionTLS12,
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+		},
+		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP521, tls.CurveP384, tls.CurveP256},
+	}
+
+	if err := c.srv.ServeTLS(c.listener, c.tlsCert, c.tlsKey); err != nil {
+		return errors.WithMessage(err, "serve https")
+	}
+
+	return nil
+}
+
+func (c *Server) validate() error {
 	var err error
 
 	c.davDir, err = filepath.Abs(c.davDir)
@@ -355,88 +407,36 @@ func (c *Server) Validate() error {
 	return nil
 }
 
-func (c *Server) Start(ctx context.Context, backuper *Backuper) error {
-	handler, users, err := c.setupHandlers(backuper)
+func (c *Server) setupServer(users map[string]string, backuper *Backuper) (*http.Server, error) {
+	var (
+		handler http.Handler
+		err     error
+	)
+
+	if c.authMethod == AuthNone {
+		handler, err = newUserHandler("", "", c.davDir, backuper)
+	} else {
+		handler, err = newMultiUserHandler(c.davDir, users, backuper)
+	}
+
 	if err != nil {
-		return err
+		return nil, errors.WithMessage(err, "prepare handler")
 	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/favicon.ico", http.FileServerFS(staticFS))
 	mux.Handle("/", &Logger{handler})
 
-	srv := http.Server{ //nolint:exhaustruct
+	srv := &http.Server{ //nolint:exhaustruct
 		Handler:           mux,
 		ReadHeaderTimeout: ServerHeaderTimeout,
 		ReadTimeout:       ServerReadTimeout,
 	}
 
-	lconfig := &net.ListenConfig{} //nolint:exhaustruct
-
-	lis, err := lconfig.Listen(ctx, "tcp", c.listen)
-	if err != nil {
-		return errors.WithMessage(err, "start listen")
-	}
-
-	backuper.start(ctx, users)
-
-	if c.tlsCert == "" || c.tlsKey == "" {
-		return c.startHTTP(ctx, &srv, lis)
-	}
-
-	return c.startHTTPS(ctx, &srv, lis)
+	return srv, nil
 }
 
-func (c *Server) startHTTP(ctx context.Context, srv *http.Server, lis net.Listener) error {
-	slog.InfoContext(ctx, "server: listening on '"+c.listen+"' (http)")
-
-	if err := srv.Serve(lis); err != nil {
-		return errors.WithMessage(err, "serve http")
-	}
-
-	return nil
-}
-
-func (c *Server) startHTTPS(ctx context.Context, srv *http.Server, lis net.Listener) error {
-	slog.InfoContext(ctx, "server: listening on '"+c.listen+"' (https)")
-
-	srv.TLSConfig = &tls.Config{ //nolint:exhaustruct
-		MinVersion: tls.VersionTLS12,
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-		},
-		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP521, tls.CurveP384, tls.CurveP256},
-	}
-
-	if err := srv.ServeTLS(lis, c.tlsCert, c.tlsKey); err != nil {
-		return errors.WithMessage(err, "serve https")
-	}
-
-	return nil
-}
-
-func (c *Server) setupHandlers(backuper *Backuper) (http.Handler, []string, error) {
-	if c.authMethod == AuthNone {
-		h, err := newUserHandler("", "", c.davDir, backuper)
-		if err != nil {
-			return nil, nil, errors.WithMessage(err, "prepare handler")
-		}
-
-		return h, nil, nil
-	}
-
-	m := &MultiUserHandler{auth: c.authMethod} //nolint:exhaustruct
-	if err := m.loadUsers(c.davDir, c.htpassPath, backuper); err != nil {
-		return nil, nil, errors.WithMessage(err, "load users")
-	}
-
-	return m, slices.Collect(maps.Keys(m.handlers)), nil
-}
+// -------------------------------------------------------------------
 
 func renderError(w http.ResponseWriter, status int, err error) {
 	var msg string

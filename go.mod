@@ -6,6 +6,7 @@ require (
 	github.com/lmittmann/tint v1.2.1
 	github.com/mattn/go-colorable v0.1.15
 	github.com/mattn/go-isatty v0.0.24
+	github.com/oklog/run v1.2.0
 	github.com/rs/xid v1.6.0
 	github.com/sergi/go-diff v1.4.0
 	github.com/urfave/cli/v3 v3.14.0
