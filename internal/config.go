@@ -63,7 +63,7 @@ func newConfigFromCmd(cmd *cli.Command) (*Config, error) {
 		BackupPolicy:   cmd.String("backup.policy"),
 		BackupCompress: cmd.Bool("backup.compress"),
 		BackupDir:      cmd.String("backup.dir"),
-		BackupSqlite:   cmd.String("backup.sqlite_fiel"),
+		BackupSqlite:   cmd.String("backup.sqlite_file"),
 	}, nil
 }
 
