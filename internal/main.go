@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 
 	"github.com/urfave/cli/v3"
 	"gitlab.com/tozd/go/errors"
@@ -62,7 +63,8 @@ func Main() { //nolint:funlen
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name: "wikis", Value: ".", Usage: "Directory of TiddlyWikis to serve over WebDAV.",
-						Sources: cli.EnvVars("WIDDLEREX_WIKIS"),
+						Sources:   cli.EnvVars("WIDDLEREX_WIKIS"),
+						Validator: dirMustExistsValidator,
 					},
 					&cli.StringFlag{
 						Name: "http", Value: "localhost:8080", Usage: "Listen on.", Category: CliCategoryServer,
@@ -70,32 +72,37 @@ func Main() { //nolint:funlen
 					},
 					&cli.StringFlag{
 						Name: "tlscert", Usage: "TLS certificate.", Category: CliCategoryServer,
-						Sources: cli.EnvVars("WIDDLEREX_TLS_CERT"),
+						Sources:   cli.EnvVars("WIDDLEREX_TLS_CERT"),
+						Validator: fileMustExistsValidator,
 					},
 					&cli.StringFlag{
 						Name: "tlskey", Usage: "TLS key.", Category: CliCategoryServer,
-						Sources: cli.EnvVars("WIDDLEREX_TLS_KEY"),
+						Sources:   cli.EnvVars("WIDDLEREX_TLS_KEY"),
+						Validator: fileMustExistsValidator,
 					},
 					&cli.StringFlag{
-						Name:     "htpass",
-						Value:    ".htpasswd",
-						Usage:    "Path to .htpasswd file.",
-						Category: "Authentication",
-						Sources:  cli.EnvVars("WIDDLEREX_HTPASS"),
+						Name:      "htpass",
+						Value:     ".htpasswd",
+						Usage:     "Path to .htpasswd file.",
+						Category:  "Authentication",
+						Sources:   cli.EnvVars("WIDDLEREX_HTPASS"),
+						Validator: fileMustExistsValidator,
 					},
 					&cli.StringFlag{
-						Name:     "auth",
-						Value:    "none",
-						Usage:    "Enable HTTP authentication (basic, none).",
-						Category: "Authentication",
-						Sources:  cli.EnvVars("WIDDLEREX_AUTH"),
+						Name:      "auth",
+						Value:     "none",
+						Usage:     "Enable HTTP authentication (basic, none).",
+						Category:  "Authentication",
+						Sources:   cli.EnvVars("WIDDLEREX_AUTH"),
+						Validator: argChoiceValidator("basic", "none", ""),
 					},
 					&cli.StringFlag{
-						Name:     "backup.dir",
-						Value:    "backups",
-						Usage:    "Directory for backups in user directory.",
-						Category: CliCategoryBackup,
-						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_DIR"),
+						Name:      "backup.dir",
+						Value:     "backups",
+						Usage:     "Directory for backups in user directory.",
+						Category:  CliCategoryBackup,
+						Sources:   cli.EnvVars("WIDDLEREX_BACKUP_DIR"),
+						Validator: dirMustExistsValidator,
 					},
 					&cli.BoolFlag{Name: "backup.compress", Value: false, Usage: "compress backup with GZIP."},
 					&cli.StringFlag{
@@ -113,17 +120,19 @@ func Main() { //nolint:funlen
 						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_INTERVAL"),
 					},
 					&cli.StringFlag{
-						Name:     "backup.mode",
-						Usage:    "Enable backup and select mode (file, sqlite)",
-						Category: "Backup",
-						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_MODE"),
+						Name:      "backup.mode",
+						Usage:     "Enable backup and select mode (file, sqlite)",
+						Category:  "Backup",
+						Sources:   cli.EnvVars("WIDDLEREX_BACKUP_MODE"),
+						Validator: argChoiceValidator("file", "sqlite", ""),
 					},
 					&cli.StringFlag{
-						Name:     "backup.sqlite_file",
-						Value:    DefaultBackupFilename,
-						Usage:    "Backup file for 'sqlite' backup mode",
-						Category: CliCategoryBackup,
-						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
+						Name:      "backup.sqlite_file",
+						Value:     DefaultBackupFilename,
+						Usage:     "Backup file for 'sqlite' backup mode",
+						Category:  CliCategoryBackup,
+						Sources:   cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
+						Validator: fileMustExistsValidator,
 					},
 				},
 				Action: serverCmd,
@@ -146,10 +155,11 @@ func Main() { //nolint:funlen
 				Usage: "List created backups in SQLite file.",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:    "file",
-						Value:   DefaultBackupFilename,
-						Usage:   "Path to backup file.",
-						Sources: cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
+						Name:      "file",
+						Value:     DefaultBackupFilename,
+						Usage:     "Path to backup file.",
+						Sources:   cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
+						Validator: fileMustExistsValidator,
 					},
 					&cli.StringFlag{Name: "username", Usage: "Username for filter backups"},
 				},
@@ -160,10 +170,11 @@ func Main() { //nolint:funlen
 				Usage: "Restore a given backup from SQLite file.",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:    "file",
-						Value:   DefaultBackupFilename,
-						Usage:   "Path to backup file.",
-						Sources: cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
+						Name:      "file",
+						Value:     DefaultBackupFilename,
+						Usage:     "Path to backup file.",
+						Sources:   cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
+						Validator: fileMustExistsValidator,
 					},
 					&cli.Int64Flag{Name: "backupid", Usage: "Backup ID to restore", Required: true},
 				},
@@ -172,7 +183,11 @@ func Main() { //nolint:funlen
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			setupLogging(cmd.String("log.level"), cmd.String("log.format"))
+
 			devmode = cmd.Bool("devmode")
+			if devmode {
+				slog.Warn("devmode enabled")
+			}
 
 			return ctx, nil
 		},
@@ -347,6 +362,52 @@ func ensureWikisHomeExists(dir string) error {
 		}
 	} else if err != nil {
 		return errors.WithMessage(err, "stat wikis dir")
+	}
+
+	return nil
+}
+
+// -------------------------------------------------------------------
+
+func argChoiceValidator(values ...string) func(v string) error {
+	return func(v string) error {
+		if slices.Contains(values, v) {
+			return nil
+		}
+
+		return errors.Errorf("accepted values: %v", values)
+	}
+}
+
+func fileMustExistsValidator(v string) error {
+	if v == "" {
+		return nil
+	}
+
+	s, err := os.Stat(v)
+	if s == nil || errors.Is(err, os.ErrNotExist) {
+		return errors.New("file do not exists")
+	}
+
+	if s.IsDir() {
+		return errors.Errorf("%q is a directory", v)
+	}
+
+	return nil
+}
+
+func dirMustExistsValidator(v string) error {
+	if v == "" {
+		return nil
+	}
+
+	s, err := os.Stat(v)
+	if s == nil || errors.Is(err, os.ErrNotExist) {
+		return errors.New("file do not exists")
+	}
+
+	if !s.IsDir() {
+		return errors.Errorf("%q is not a directory", v)
 	}
 
 	return nil
