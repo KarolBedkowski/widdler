@@ -8,7 +8,6 @@ package internal
 //
 
 import (
-	"context"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -24,7 +23,7 @@ func (u *userHomeHandler) handleBrowse(w http.ResponseWriter, r *http.Request, r
 		return u.handleNewFile(w, r, reqpath)
 	}
 
-	content, err := u.getDirContent(r.Context(), reqpath)
+	content, err := u.getDirContent(reqpath)
 	if err != nil {
 		return WithPublic(errors.WithMessage(err, "read dir content"), "Internal error: can read wikis directory")
 	}
@@ -64,9 +63,7 @@ func (u *userHomeHandler) handleNewFile(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
-func (u *userHomeHandler) getDirContent(ctx context.Context, reqpath string) (*DirContent, error) {
-	_ = ctx
-
+func (u *userHomeHandler) getDirContent(reqpath string) (*DirContent, error) { //nolint:cyclop
 	root, err := os.OpenRoot(u.home)
 	if err != nil {
 		return nil, errors.WithDetails(errors.WithMessage(err, "open user home dir"),
@@ -74,6 +71,14 @@ func (u *userHomeHandler) getDirContent(ctx context.Context, reqpath string) (*D
 	}
 
 	defer root.Close()
+
+	if s, err := root.Stat(reqpath); err != nil {
+		return nil, errors.WithMessage(err, "read dir")
+	} else if !s.IsDir() {
+		return nil, errors.WithMessage(ErrNotFound, "is not a dir")
+	} else if s.Name()[0] == '.' && s.Name() != "." {
+		return nil, errors.WithMessage(ErrNotFound, "hidden dir")
+	}
 
 	rdfs, _ := root.FS().(fs.ReadDirFS)
 

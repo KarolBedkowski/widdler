@@ -96,11 +96,9 @@ func (u *userHomeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (u *userHomeHandler) handleHTML(w http.ResponseWriter, r *http.Request, path string) error {
-	if ext := filepath.Ext(r.URL.Path); ext != ".html" && ext != ".htm" {
-		return ErrNotFound
-	}
-
+func (u *userHomeHandler) handleHTML(w http.ResponseWriter, r *http.Request, path string) error { //nolint:cyclop
+	ext := filepath.Ext(r.URL.Path)
+	ishtml := ext == ".html" || ext == ".htm"
 	ctx := r.Context()
 
 	root, err := os.OpenRoot(u.home)
@@ -111,8 +109,8 @@ func (u *userHomeHandler) handleHTML(w http.ResponseWriter, r *http.Request, pat
 
 	defer root.Close()
 
-	switch _, err := root.Stat(path); {
-	case os.IsNotExist(err):
+	switch s, err := root.Stat(path); {
+	case os.IsNotExist(err) && ishtml:
 		// file not exists, try create empty
 		slog.InfoContext(ctx, "server: creating empty wiki", "root", root)
 
@@ -122,12 +120,15 @@ func (u *userHomeHandler) handleHTML(w http.ResponseWriter, r *http.Request, pat
 		}
 	case err != nil:
 		return errors.WithMessagef(err, "check file %q", path)
+	case s.IsDir() || s.Name()[0] == '.':
+		// handle later by browse
+		return ErrNotFound
 	case !validateContentType(r, "text/html"):
 		// require text/html content type
 		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 
 		return nil
-	case r.Method == http.MethodPut:
+	case r.Method == http.MethodPut && ishtml:
 		// no error, file exists, make backup on put
 		if err := u.b.create(ctx, root, u.user, path); err != nil {
 			return WithPublic(errors.WithMessage(err, "create backup"),
