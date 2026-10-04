@@ -34,9 +34,8 @@ var staticFS embed.FS
 // -------------------------------------------------------------------
 
 type userHomeHandler struct {
-	b    *Backuper
-	dav  *webdav.Handler
-	root *os.Root
+	b   *Backuper
+	dav *webdav.Handler
 
 	user string
 	home string
@@ -45,12 +44,6 @@ type userHomeHandler struct {
 
 func newUserHandler(user, homedir string, backuper *Backuper) (*userHomeHandler, error) {
 	slog.Debug("new user handler", "user", user, "homedir", homedir)
-
-	root, err := os.OpenRoot(homedir)
-	if err != nil {
-		return nil, errors.WithDetails(errors.WithMessage(err, "open user home dir"),
-			"user", user, "homedir", homedir)
-	}
 
 	dav := &webdav.Handler{ //nolint:exhaustruct
 		LockSystem: webdav.NewMemLS(),
@@ -66,7 +59,6 @@ func newUserHandler(user, homedir string, backuper *Backuper) (*userHomeHandler,
 		b:    backuper,
 		user: user,
 		home: homedir,
-		root: root,
 		dav:  dav,
 	}, nil
 }
@@ -103,14 +95,7 @@ func (u *userHomeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Everything else is browsable
 	switch err := u.handleBrowse(w, r, resolvedPath); {
 	case errors.Is(err, ErrNotFound):
-		slog.InfoContext(
-			ctx,
-			"server: handle browse error - not found",
-			"path",
-			resolvedPath,
-			"err",
-			SlogStrippedErrValue(err),
-		)
+		slog.InfoContext(ctx, "server: handle browse error - not found", "path", resolvedPath)
 		renderError(w, http.StatusNotFound, nil)
 	case err != nil:
 		slog.ErrorContext(ctx, "server: handle browse error", "path", resolvedPath, "err", err)
@@ -125,12 +110,20 @@ func (u *userHomeHandler) handleHTML(w http.ResponseWriter, r *http.Request, pat
 
 	ctx := r.Context()
 
-	switch _, err := u.root.Stat(path); {
+	root, err := os.OpenRoot(u.home)
+	if err != nil {
+		return errors.WithDetails(errors.WithMessage(err, "open user home dir"),
+			"user", u.user, "homedir", u.home)
+	}
+
+	defer root.Close()
+
+	switch _, err := root.Stat(path); {
 	case os.IsNotExist(err):
 		// file not exists, try create empty
-		slog.InfoContext(ctx, "server: creating empty wiki", "root", u.root)
+		slog.InfoContext(ctx, "server: creating empty wiki", "root", root)
 
-		if err := createEmptyWiki(ctx, u.root, path); err != nil {
+		if err := createEmptyWiki(ctx, root, path); err != nil {
 			return WithPublic(errors.WithMessage(err, "create empty wiki"),
 				"Internal error: failed create empty wiki")
 		}
@@ -143,7 +136,7 @@ func (u *userHomeHandler) handleHTML(w http.ResponseWriter, r *http.Request, pat
 		return nil
 	case r.Method == http.MethodPut:
 		// no error, file exists, make backup on put
-		if err := u.b.create(ctx, u.root, u.user, path); err != nil {
+		if err := u.b.create(ctx, root, u.user, path); err != nil {
 			return WithPublic(errors.WithMessage(err, "create backup"),
 				"Internal error: failed create backup")
 		}

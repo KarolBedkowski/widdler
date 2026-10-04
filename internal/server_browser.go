@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -30,9 +31,7 @@ func (u *userHomeHandler) handleBrowse(w http.ResponseWriter, r *http.Request, r
 
 	w.Header().Add("Cache-Control", "no-cache")
 
-	WritePageTemplate(w, &ServerBrowserIndexPage{
-		data: &content,
-	})
+	WritePageTemplate(w, &ServerBrowserIndexPage{data: content})
 
 	return nil
 }
@@ -65,13 +64,22 @@ func (u *userHomeHandler) handleNewFile(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
-func (u *userHomeHandler) getDirContent(ctx context.Context, reqpath string) (DirContent, error) {
+func (u *userHomeHandler) getDirContent(ctx context.Context, reqpath string) (*DirContent, error) {
 	_ = ctx
-	rdfs, _ := u.root.FS().(fs.ReadDirFS)
+
+	root, err := os.OpenRoot(u.home)
+	if err != nil {
+		return nil, errors.WithDetails(errors.WithMessage(err, "open user home dir"),
+			"user", u.user, "homedir", u.home)
+	}
+
+	defer root.Close()
+
+	rdfs, _ := root.FS().(fs.ReadDirFS)
 
 	entries, err := rdfs.ReadDir(reqpath)
 	if err != nil {
-		return DirContent{}, errors.WithMessage(err, "read dir")
+		return nil, errors.WithMessage(err, "read dir")
 	}
 
 	files := make([]fs.DirEntry, 0, len(entries))
@@ -98,7 +106,7 @@ func (u *userHomeHandler) getDirContent(ctx context.Context, reqpath string) (Di
 		parent = filepath.Dir(reqpath)
 	}
 
-	return DirContent{
+	return &DirContent{
 		Files:             files,
 		Dirs:              dirs,
 		Parent:            parent,
