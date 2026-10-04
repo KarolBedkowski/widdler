@@ -21,11 +21,6 @@ import (
 
 const cleanTaskInterval = 3600 // sec
 
-const (
-	backupModeFile   = "file"
-	backupModeSqlite = "sqlite"
-)
-
 // ---------------------------------------------------------------------------------
 
 type BackupHandler interface {

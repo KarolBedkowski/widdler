@@ -10,7 +10,6 @@ package internal
 import (
 	"compress/gzip"
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -59,8 +58,8 @@ func (b *BackuperFile) Create(ctx context.Context, root *os.Root, user, srcFileP
 	_ = user
 
 	// create backup dir if not exists
-	if err := ensureBackupDirExists(ctx, root, b.backupDir); err != nil {
-		return err
+	if err := ensureDirExistsInRoot(root, b.backupDir); err != nil {
+		return errors.WithMessage(err, "ensure backup dir")
 	}
 
 	dstFilePath := filepath.Clean(path.Join(b.backupDir, srcFilePath))
@@ -252,23 +251,6 @@ func splitNameExt(path string) (string, string) {
 	base := path[0 : len(path)-len(ext)]
 
 	return base, ext
-}
-
-func ensureBackupDirExists(ctx context.Context, root *os.Root, backupDir string) error {
-	const dirPerm = 0o700
-
-	// create backup dir if not exists
-	if _, err := root.Stat(backupDir); os.IsNotExist(err) {
-		if err := root.Mkdir(backupDir, dirPerm); err != nil {
-			return errors.WithMessage(err, "create backup dir")
-		}
-
-		slog.InfoContext(ctx, fmt.Sprintf("filebackup: created backup dir %s in %s", backupDir, root.Name()))
-	} else if err != nil {
-		return errors.WithMessage(err, "stat backup dir")
-	}
-
-	return nil
 }
 
 // closeFile close obj and log error.

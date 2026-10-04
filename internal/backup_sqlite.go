@@ -27,7 +27,6 @@ import (
 )
 
 const (
-	maxFileSize            = 1024 * 1024 * 128            // 128 MB
 	createNextFullInterval = time.Duration(8) * time.Hour // create full backup every 8h
 )
 
@@ -326,7 +325,7 @@ func (b *BackuperSqlite) restoreBackupHandler(ctx context.Context, w http.Respon
 
 		slog.InfoContext(ctx, "restore backup file", "filename", fname, "backupid", backupid)
 
-		if err := root.WriteFile(fname, data.Data, 0o660); err != nil { //nolint:mnd
+		if err := root.WriteFile(fname, data.Data, defaultFilePerm); err != nil {
 			slog.ErrorContext(ctx, "write file error", "backup.filename", data.Filename, "err", err)
 			renderError(w, http.StatusInternalServerError, err)
 
@@ -617,7 +616,7 @@ func decompressContent(content []byte) ([]byte, error) {
 
 	var bufout bytes.Buffer
 
-	_, err := io.CopyN(&bufout, zr, maxFileSize)
+	_, err := io.CopyN(&bufout, zr, maxWikiFileSize)
 	zr.Close()
 
 	if err != nil && !errors.Is(err, io.EOF) {

@@ -1,5 +1,12 @@
 package internal
 
+//
+// support.go
+// Copyright (C) 2025 Karol Będkowski <Karol Będkowski@kkomp>
+//
+// Distributed under terms of the GPLv3 license.
+//
+
 import (
 	"fmt"
 	"log/slog"
@@ -11,13 +18,6 @@ import (
 
 	"gitlab.com/tozd/go/errors"
 )
-
-//
-// support.go
-// Copyright (C) 2025 Karol Będkowski <Karol Będkowski@kkomp>
-//
-// Distributed under terms of the GPLv3 license.
-//
 
 func formatDate(t time.Time) string { return t.Local().Format(time.DateTime) } //nolint:gosmopolitan
 
@@ -84,16 +84,26 @@ func validateContentType(r *http.Request, contentType ...string) bool {
 // -------------------------------------------------------------------
 
 func ensureDirExists(dir string) error {
-	const dirPerm = 0o700
-
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		slog.Info("creating dir " + dir)
 
-		if err := os.Mkdir(dir, dirPerm); err != nil {
+		if err := os.Mkdir(dir, defaultDirPerm); err != nil {
 			return errors.WithMessage(err, "create dir")
 		}
 	} else if err != nil {
 		return errors.WithMessage(err, "stat dir")
+	}
+
+	return nil
+}
+
+func ensureDirExistsInRoot(root *os.Root, backupDir string) error {
+	if _, err := root.Stat(backupDir); os.IsNotExist(err) {
+		if err := root.Mkdir(backupDir, defaultDirPerm); err != nil {
+			return errors.WithMessage(err, "create backup dir")
+		}
+	} else if err != nil {
+		return errors.WithMessage(err, "stat backup dir")
 	}
 
 	return nil

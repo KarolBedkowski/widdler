@@ -109,5 +109,23 @@ func loadUsers(authmethod, htpassPath string) (map[string]string, error) {
 		users[parts[0]] = parts[1]
 	}
 
+	if len(users) == 0 {
+		return nil, errors.New("no user defined in password file")
+	}
+
 	return users, nil
 }
+
+//------------------------------------------------------------------------------
+
+const (
+	defaultFilePerm = 0o600
+	defaultDirPerm  = 0o700
+)
+
+const maxWikiFileSize = 1024 * 1024 * 128 // 128 MB
+
+const (
+	backupModeFile   = "file"
+	backupModeSqlite = "sqlite"
+)

@@ -369,9 +369,7 @@ func mainGenPass(ctx context.Context, cmd *cli.Command) error {
 		return errors.WithMessage(err, "hash password")
 	}
 
-	const filePerm = 0o600
-
-	f, err := os.OpenFile(passPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
+	f, err := os.OpenFile(passPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, defaultFilePerm)
 	if err != nil {
 		return errors.WithMessage(err, "open passfile")
 	}

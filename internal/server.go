@@ -157,8 +157,6 @@ func (u *userHomeHandler) handleHTML(w http.ResponseWriter, r *http.Request, pat
 // -------------------------------------------------------------------
 
 func createEmptyWiki(ctx context.Context, root *os.Root, path string) error {
-	const filePerm = 0o600
-
 	slog.InfoContext(ctx, "server: downloading", "url", emptyURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, emptyURL, http.NoBody)
@@ -173,7 +171,7 @@ func createEmptyWiki(ctx context.Context, root *os.Root, path string) error {
 
 	defer resp.Body.Close()
 
-	out, err := root.OpenFile(path, os.O_RDWR|os.O_CREATE, filePerm)
+	out, err := root.OpenFile(path, os.O_RDWR|os.O_CREATE, defaultFilePerm)
 	if err != nil {
 		return errors.WithMessage(err, "open output file")
 	}
@@ -190,30 +188,19 @@ func createEmptyWiki(ctx context.Context, root *os.Root, path string) error {
 
 // -------------------------------------------------------------------
 
-type userHandlers map[string]*userHomeHandler
-
 type MultiUserHandler struct {
-	handlers userHandlers
+	handlers map[string]*userHomeHandler
 }
 
 func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Block .htpasswd, Prevent directory traversal
-	if strings.Contains(r.URL.Path, ".htpasswd") || strings.Contains(r.URL.Path, "..") {
-		http.NotFound(w, r)
-
-		return
-	}
-
 	user := UserFromCtx(r.Context())
 
 	if h, ok := m.handlers[user]; ok {
 		h.ServeHTTP(w, r)
-
-		return
+	} else {
+		w.Header().Set("WWW-Authenticate", `Basic realm="widdlerex"`)
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 	}
-
-	w.Header().Set("WWW-Authenticate", `Basic realm="widdlerex"`)
-	http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 }
 
 func newMultiUserHandler(basedir string, users map[string]string, backuper *Backuper) (*MultiUserHandler, error) {
@@ -226,10 +213,6 @@ func newMultiUserHandler(basedir string, users map[string]string, backuper *Back
 		}
 
 		handlers[user] = h
-	}
-
-	if len(handlers) == 0 {
-		return nil, errors.New("no user defined in password file")
 	}
 
 	return &MultiUserHandler{handlers: handlers}, nil
@@ -272,7 +255,7 @@ func newServer(cfg *Config, users map[string]string, backuper *Backuper) (*Serve
 	}
 
 	server.srv = &http.Server{ //nolint:exhaustruct
-		Handler:           &Logger{roothandler},
+		Handler:           &secMiddleware{&Logger{roothandler}},
 		ReadHeaderTimeout: ServerHeaderTimeout,
 		ReadTimeout:       ServerReadTimeout,
 	}
@@ -344,6 +327,23 @@ func (c *Server) startHTTPS(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// -------------------------------------------------------------------
+
+type secMiddleware struct {
+	next http.Handler
+}
+
+func (s *secMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Block .htpasswd, Prevent directory traversal
+	if strings.Contains(r.URL.Path, ".htpasswd") || strings.Contains(r.URL.Path, "..") {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	s.next.ServeHTTP(w, r)
 }
 
 // -------------------------------------------------------------------
