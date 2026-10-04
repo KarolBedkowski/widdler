@@ -86,7 +86,6 @@ func validateContentType(r *http.Request, contentType ...string) bool {
 func ensureDirExists(dir string) error {
 	const dirPerm = 0o700
 
-	// create backup dir if not exists
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		slog.Info("creating dir " + dir)
 

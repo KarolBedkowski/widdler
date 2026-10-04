@@ -224,13 +224,7 @@ func newMultiUserHandler(basedir string, users map[string]string, backuper *Back
 	handlers := make(map[string]*userHomeHandler, len(users))
 
 	for user := range users {
-		// TODO : move
-		homedir := filepath.Clean(path.Join(basedir, user))
-		if err := ensureDirExists(homedir); err != nil {
-			return nil, errors.WithMessagef(err, "ensure home %q for user %q", user, homedir)
-		}
-
-		h, err := newUserHandler(user, homedir, backuper)
+		h, err := newUserHandler(user, filepath.Clean(path.Join(basedir, user)), backuper)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "prepare handler for user %q", user)
 		}

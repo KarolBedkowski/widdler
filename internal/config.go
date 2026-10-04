@@ -9,6 +9,7 @@ import (
 	"encoding/csv"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/urfave/cli/v3"
@@ -65,6 +66,10 @@ func newConfigFromCmd(cmd *cli.Command) (*Config, error) {
 		BackupDir:      cmd.String("backup.dir"),
 		BackupSqlite:   cmd.String("backup.sqlite_file"),
 	}, nil
+}
+
+func (c *Config) userhome(user string) string {
+	return filepath.Clean(path.Join(c.WikisDir, user))
 }
 
 // -------------------------------------------------------------------

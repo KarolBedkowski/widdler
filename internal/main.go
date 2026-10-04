@@ -212,7 +212,7 @@ func Main() { //nolint:funlen
 
 // -------------------------------------------------------------------
 
-func serverCmd(ctx context.Context, cmd *cli.Command) error {
+func serverCmd(ctx context.Context, cmd *cli.Command) error { //nolint:cyclop
 	config, err := newConfigFromCmd(cmd)
 	if err != nil {
 		return errors.WithMessage(err, "invalid configuration")
@@ -225,6 +225,14 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 	users, err := loadUsers(config.Auth, config.HTpass)
 	if err != nil {
 		return err
+	}
+
+	usernames := slices.Collect(maps.Keys(users))
+
+	for _, u := range usernames {
+		if err := ensureDirExists(config.userhome(u)); err != nil {
+			return errors.WithMessagef(err, "user home dir %q check error", u)
+		}
 	}
 
 	backuper, err := newBackuper(ctx, config)
@@ -245,7 +253,6 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error {
 	runGroup := run.Group{}
 
 	if backuper.enabled {
-		usernames := slices.Collect(maps.Keys(users))
 		runGroup.Add(func() error { return backuper.Run(ctx, usernames) }, func(error) {})
 	}
 
