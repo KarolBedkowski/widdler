@@ -84,10 +84,6 @@ func (u *userHomeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if u.b.handleBackupsPage(ctx, w, r, u.root, u.user) {
-		return
-	}
-
 	resolvedPath := filepath.Clean(filepath.Join(".", r.URL.Path))
 
 	ctx = slogctx.Append(ctx, slog.String("file_path", resolvedPath))
@@ -265,16 +261,18 @@ func newServer(cfg *Config, users map[string]string, backuper *Backuper) (*Serve
 		return nil, errors.WithMessage(err, "prepare handler")
 	}
 
+	mux := http.NewServeMux()
+	mux.Handle("/", handler)
+	mux.Handle("/favicon.ico", http.FileServerFS(staticFS))
+	mux.Handle("/_backups/", backuper)
+
+	var roothandler http.Handler = mux
 	if cfg.Auth != AuthNone {
-		handler = &Authenticator{handler, users}
+		roothandler = &Authenticator{mux, users}
 	}
 
-	mux := http.NewServeMux()
-	mux.Handle("/favicon.ico", http.FileServerFS(staticFS))
-	mux.Handle("/", &Logger{handler})
-
 	server.srv = &http.Server{ //nolint:exhaustruct
-		Handler:           mux,
+		Handler:           &Logger{roothandler},
 		ReadHeaderTimeout: ServerHeaderTimeout,
 		ReadTimeout:       ServerReadTimeout,
 	}

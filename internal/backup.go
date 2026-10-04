@@ -95,6 +95,34 @@ func (b *Backuper) Run(ctx context.Context, users []string) error {
 	return nil
 }
 
+// ServeHTTP handle backup browse and restore.
+func (b *Backuper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	handler, ok := b.handler.(backupListHandler)
+	if !ok {
+		renderError(w, http.StatusNotImplemented, nil)
+
+		return
+	}
+
+	ctx := r.Context()
+	user := UserFromCtx(ctx)
+	home := b.cfg.userhome(user)
+
+	root, err := os.OpenRoot(home)
+	if err != nil {
+		slog.ErrorContext(ctx, "open homedir", "err", err)
+		renderError(w, http.StatusInternalServerError, err)
+
+		return
+	}
+
+	defer root.Close()
+
+	if !handler.ListHandler(ctx, w, r, root, user) {
+		renderError(w, http.StatusNotFound, nil)
+	}
+}
+
 // create backup of `srcFilePath` in `root`.
 func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath string) error {
 	if !b.enabled {
@@ -169,22 +197,4 @@ func (b *Backuper) cleanWorker(ctx context.Context, users []string) {
 			}
 		}
 	}
-}
-
-func (b *Backuper) handleBackupsPage(
-	ctx context.Context,
-	w http.ResponseWriter,
-	r *http.Request,
-	root *os.Root,
-	user string,
-) bool {
-	if !b.supportBackupsPage {
-		return false
-	}
-
-	if bh, ok := b.handler.(backupListHandler); ok {
-		return bh.ListHandler(ctx, w, r, root, user)
-	}
-
-	return false
 }
