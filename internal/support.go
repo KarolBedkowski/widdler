@@ -84,26 +84,36 @@ func validateContentType(r *http.Request, contentType ...string) bool {
 // -------------------------------------------------------------------
 
 func ensureDirExists(dir string) error {
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		slog.Info("creating dir " + dir)
+	s, err := os.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		slog.Info("creating directory", "dir", dir)
 
 		if err := os.Mkdir(dir, defaultDirPerm); err != nil {
 			return errors.WithMessage(err, "create dir")
 		}
-	} else if err != nil {
+	case err != nil:
 		return errors.WithMessage(err, "stat dir")
+	case !s.IsDir():
+		return errors.New("exists but is not directory")
 	}
 
 	return nil
 }
 
-func ensureDirExistsInRoot(root *os.Root, backupDir string) error {
-	if _, err := root.Stat(backupDir); os.IsNotExist(err) {
-		if err := root.Mkdir(backupDir, defaultDirPerm); err != nil {
-			return errors.WithMessage(err, "create backup dir")
+func ensureDirExistsInRoot(root *os.Root, dir string) error {
+	s, err := root.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		slog.Info("creating directory", "dir", dir)
+
+		if err := root.Mkdir(dir, defaultDirPerm); err != nil {
+			return errors.WithMessage(err, "create dir")
 		}
-	} else if err != nil {
-		return errors.WithMessage(err, "stat backup dir")
+	case err != nil:
+		return errors.WithMessage(err, "stat dir")
+	case !s.IsDir():
+		return errors.New("exists but is not directory")
 	}
 
 	return nil

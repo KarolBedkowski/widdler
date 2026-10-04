@@ -34,7 +34,7 @@ type ServerBrowserIndexPage struct {
 {% if p.data.SupportBackupsDir %}
 
 <h3>Backups</h3>
-<a href="/_backups">Browse backuped files</a>
+<a href="/_backups/">Browse backuped files</a>
 
 {% endif %}
 

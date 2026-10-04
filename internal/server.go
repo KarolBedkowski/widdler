@@ -42,7 +42,7 @@ type userHomeHandler struct {
 	mu   sync.Mutex
 }
 
-func newUserHandler(user, homedir string, backuper *Backuper) (*userHomeHandler, error) {
+func newUserHandler(user, homedir string, backuper *Backuper) *userHomeHandler {
 	slog.Debug("new user handler", "user", user, "homedir", homedir)
 
 	dav := &webdav.Handler{ //nolint:exhaustruct
@@ -60,26 +60,19 @@ func newUserHandler(user, homedir string, backuper *Backuper) (*userHomeHandler,
 		user: user,
 		home: homedir,
 		dav:  dav,
-	}, nil
+	}
 }
 
 func (u *userHomeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	ctx := slogctx.Append(r.Context(), slog.String("user", u.user))
-	r = r.WithContext(ctx)
-
-	if strings.HasSuffix(r.URL.Path, "/favicon.ico") {
-		http.ServeFileFS(w, r, staticFS, "favicon.ico")
-
-		return
-	}
-
 	resolvedPath := filepath.Clean(filepath.Join(".", r.URL.Path))
 
-	ctx = slogctx.Append(ctx, slog.String("file_path", resolvedPath))
+	ctx := slogctx.Append(r.Context(), slog.String("file_path", resolvedPath))
 	slog.DebugContext(ctx, "server: resolved file")
+
+	r = r.WithContext(ctx)
 
 	// HTML files will be created or sent back
 	switch err := u.handleHTML(w, r, resolvedPath); {
@@ -196,19 +189,14 @@ func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func newMultiUserHandler(basedir string, users map[string]string, backuper *Backuper) (*MultiUserHandler, error) {
+func newMultiUserHandler(basedir string, users map[string]string, backuper *Backuper) *MultiUserHandler {
 	handlers := make(map[string]*userHomeHandler, len(users))
 
 	for user := range users {
-		h, err := newUserHandler(user, filepath.Clean(path.Join(basedir, user)), backuper)
-		if err != nil {
-			return nil, errors.WithMessagef(err, "prepare handler for user %q", user)
-		}
-
-		handlers[user] = h
+		handlers[user] = newUserHandler(user, filepath.Clean(path.Join(basedir, user)), backuper)
 	}
 
-	return &MultiUserHandler{handlers: handlers}, nil
+	return &MultiUserHandler{handlers: handlers}
 }
 
 // -------------------------------------------------------------------
@@ -219,22 +207,15 @@ type Server struct {
 	listener net.Listener
 }
 
-func newServer(cfg *Config, users map[string]string, backuper *Backuper) (*Server, error) {
+func newServer(cfg *Config, users map[string]string, backuper *Backuper) *Server {
 	server := &Server{cfg: cfg}
 
-	var (
-		handler http.Handler
-		err     error
-	)
+	var handler http.Handler
 
 	if cfg.Auth == AuthNone {
-		handler, err = newUserHandler("", cfg.WikisDir, backuper)
+		handler = newUserHandler("", cfg.WikisDir, backuper)
 	} else {
-		handler, err = newMultiUserHandler(cfg.WikisDir, users, backuper)
-	}
-
-	if err != nil {
-		return nil, errors.WithMessage(err, "prepare handler")
+		handler = newMultiUserHandler(cfg.WikisDir, users, backuper)
 	}
 
 	mux := http.NewServeMux()
@@ -253,7 +234,7 @@ func newServer(cfg *Config, users map[string]string, backuper *Backuper) (*Serve
 		ReadTimeout:       ServerReadTimeout,
 	}
 
-	return server, nil
+	return server
 }
 
 func (c *Server) StartListen(ctx context.Context) error {

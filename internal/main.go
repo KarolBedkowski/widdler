@@ -212,7 +212,7 @@ func Main() { //nolint:funlen
 
 // -------------------------------------------------------------------
 
-func serverCmd(ctx context.Context, cmd *cli.Command) error { //nolint:cyclop
+func serverCmd(ctx context.Context, cmd *cli.Command) error {
 	config, err := newConfigFromCmd(cmd)
 	if err != nil {
 		return errors.WithMessage(err, "invalid configuration")
@@ -229,10 +229,8 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error { //nolint:cyclop
 
 	usernames := slices.Collect(maps.Keys(users))
 
-	for _, u := range usernames {
-		if err := ensureDirExists(config.userhome(u)); err != nil {
-			return errors.WithMessagef(err, "user home dir %q check error", u)
-		}
+	if err := ensureUserHomesExists(config.WikisDir, usernames); err != nil {
+		return err
 	}
 
 	backuper, err := newBackuper(ctx, config)
@@ -240,11 +238,7 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error { //nolint:cyclop
 		return errors.WithMessage(err, "initiate backup")
 	}
 
-	server, err := newServer(config, users, backuper)
-	if err != nil {
-		return err
-	}
-
+	server := newServer(config, users, backuper)
 	if err := server.StartListen(ctx); err != nil {
 		return err
 	}
@@ -262,8 +256,6 @@ func serverCmd(ctx context.Context, cmd *cli.Command) error { //nolint:cyclop
 
 		return nil
 	}, func(error) { cancel() })
-
-	slog.InfoContext(ctx, "running")
 
 	if err := runGroup.Run(); err != nil {
 		return errors.WithMessage(err, "run failed")
@@ -428,6 +420,29 @@ func dirMustExistsValidator(v string) error {
 
 	if !s.IsDir() {
 		return errors.Errorf("%q is not a directory", v)
+	}
+
+	return nil
+}
+
+// -------------------------------------------------------------------
+
+func ensureUserHomesExists(base string, usernames []string) error {
+	if len(usernames) == 0 {
+		return nil
+	}
+
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		return errors.WithMessagef(err, "open root %q error", base)
+	}
+
+	defer root.Close()
+
+	for _, u := range usernames {
+		if err := ensureDirExistsInRoot(root, u); err != nil {
+			return errors.WithMessagef(err, "user home dir %q check error", u)
+		}
 	}
 
 	return nil

@@ -59,7 +59,7 @@ func (u *userHomeHandler) handleNewFile(w http.ResponseWriter, r *http.Request, 
 	}
 
 	slog.DebugContext(r.Context(), "redirect to", "reqpath", reqpath, "filename", filename)
-	http.Redirect(w, r, "/"+reqpath+"/"+filename, http.StatusMovedPermanently)
+	http.Redirect(w, r, "/"+reqpath+"/"+filename, http.StatusMovedPermanently) //nolint:gosec
 
 	return nil
 }
