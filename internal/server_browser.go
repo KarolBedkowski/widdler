@@ -18,12 +18,12 @@ import (
 	"gitlab.com/tozd/go/errors"
 )
 
-func (u *userHomeHandler) handleBrowse(w http.ResponseWriter, r *http.Request, reqpath string) error {
+func (u *userHomeHandler) handleBrowse(w http.ResponseWriter, r *http.Request, root *os.Root, reqpath string) error {
 	if r.Method == http.MethodPost {
 		return u.handleNewFile(w, r, reqpath)
 	}
 
-	content, err := u.getDirContent(reqpath)
+	content, err := u.getDirContent(root, reqpath)
 	if err != nil {
 		return WithPublic(errors.WithMessage(err, "read dir content"), "Internal error: can read wikis directory")
 	}
@@ -63,23 +63,7 @@ func (u *userHomeHandler) handleNewFile(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
-func (u *userHomeHandler) getDirContent(reqpath string) (*DirContent, error) { //nolint:cyclop
-	root, err := os.OpenRoot(u.home)
-	if err != nil {
-		return nil, errors.WithDetails(errors.WithMessage(err, "open user home dir"),
-			"user", u.user, "homedir", u.home)
-	}
-
-	defer root.Close()
-
-	if s, err := root.Stat(reqpath); err != nil {
-		return nil, errors.WithMessage(err, "read dir")
-	} else if !s.IsDir() {
-		return nil, errors.WithMessage(ErrNotFound, "is not a dir")
-	} else if s.Name()[0] == '.' && s.Name() != "." {
-		return nil, errors.WithMessage(ErrNotFound, "hidden dir")
-	}
-
+func (u *userHomeHandler) getDirContent(root *os.Root, reqpath string) (*DirContent, error) {
 	rdfs, _ := root.FS().(fs.ReadDirFS)
 
 	entries, err := rdfs.ReadDir(reqpath)
@@ -91,7 +75,7 @@ func (u *userHomeHandler) getDirContent(reqpath string) (*DirContent, error) { /
 	dirs := make([]fs.DirEntry, 0, len(entries))
 
 	for _, e := range entries {
-		if e.Name()[0] == '.' || e.Name()[0] == '_' {
+		if e.Name()[0] == '.' {
 			continue
 		}
 
@@ -102,7 +86,7 @@ func (u *userHomeHandler) getDirContent(reqpath string) (*DirContent, error) { /
 		}
 	}
 
-	parent := "/"
+	parent := ""
 
 	if reqpath == "." {
 		reqpath = ""

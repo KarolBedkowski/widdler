@@ -68,77 +68,107 @@ func (u *userHomeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer u.mu.Unlock()
 
 	resolvedPath := filepath.Clean(filepath.Join(".", r.URL.Path))
-
-	ctx := slogctx.Append(r.Context(), slog.String("file_path", resolvedPath))
+	ctx := slogctx.Append(r.Context(), slog.String("path", resolvedPath))
 	slog.DebugContext(ctx, "server: resolved file")
 
-	r = r.WithContext(ctx)
-
-	// HTML files will be created or sent back
-	switch err := u.handleHTML(w, r, resolvedPath); {
-	case err == nil:
-		return
-	case !errors.Is(err, ErrNotFound):
-		slog.ErrorContext(ctx, "server: handle html error", "path", resolvedPath, "err", err)
-		renderError(w, http.StatusInternalServerError, err)
+	if b := filepath.Base(resolvedPath); b[0] == '.' && b != "." {
+		renderError(w, http.StatusNotFound, nil)
 
 		return
 	}
 
-	// Everything else is browsable
-	switch err := u.handleBrowse(w, r, resolvedPath); {
-	case errors.Is(err, ErrNotFound):
-		slog.InfoContext(ctx, "server: handle browse error - not found", "path", resolvedPath)
-		renderError(w, http.StatusNotFound, nil)
-	case err != nil:
-		slog.ErrorContext(ctx, "server: handle browse error", "path", resolvedPath, "err", err)
+	r = r.WithContext(ctx)
+
+	root, err := os.OpenRoot(u.home)
+	if err != nil {
+		slog.ErrorContext(ctx, "server: open root error", "err", err)
+		renderError(w, http.StatusInternalServerError, err)
+
+		return
+	}
+	defer root.Close()
+
+	fileinfo, err := root.Stat(resolvedPath)
+	switch {
+	// handle not existing path
+	case os.IsNotExist(err):
+		err = u.handleNotExisting(ctx, w, r, root, resolvedPath)
+	// handle other stat errors
+	case err != nil || fileinfo == nil:
+		err = errors.WithMessagef(err, "stat %q", resolvedPath)
+	// handle existing dir -> browse
+	case fileinfo.IsDir():
+		err = u.handleBrowse(w, r, root, resolvedPath)
+	// handle existing files
+	default:
+		err = u.handleExistingFile(ctx, w, r, root, resolvedPath)
+	}
+
+	if err != nil {
+		slog.ErrorContext(ctx, "server: handler error", "err", err)
 		renderError(w, http.StatusInternalServerError, err)
 	}
 }
 
-func (u *userHomeHandler) handleHTML(w http.ResponseWriter, r *http.Request, path string) error { //nolint:cyclop
-	ext := filepath.Ext(r.URL.Path)
-	ishtml := ext == ".html" || ext == ".htm"
-	ctx := r.Context()
+func (u *userHomeHandler) handleNotExisting(
+	ctx context.Context,
+	w http.ResponseWriter,
+	r *http.Request,
+	root *os.Root,
+	resolvedPath string,
+) error {
+	switch {
+	// ignore non html files
+	case !htmlRequested(r):
+		renderError(w, http.StatusNotFound, nil)
 
-	root, err := os.OpenRoot(u.home)
-	if err != nil {
-		return errors.WithDetails(errors.WithMessage(err, "open user home dir"),
-			"user", u.user, "homedir", u.home)
+	// ignore other methods
+	case r.Method != http.MethodGet:
+		renderError(w, http.StatusNotFound, nil)
+
+	default:
+		// create empty wiki
+		if err := createEmptyWiki(ctx, root, resolvedPath); err != nil {
+			return WithPublic(errors.WithMessage(err, "create empty wiki"), "Internal error: failed create empty wiki")
+		}
+
+		// wiki created, serve
+		u.dav.ServeHTTP(w, r)
 	}
 
-	defer root.Close()
+	return nil
+}
 
-	switch s, err := root.Stat(path); {
-	case os.IsNotExist(err) && ishtml:
-		// file not exists, try create empty
-		slog.InfoContext(ctx, "server: creating empty wiki", "root", root)
-
-		if err := createEmptyWiki(ctx, root, path); err != nil {
-			return WithPublic(errors.WithMessage(err, "create empty wiki"),
-				"Internal error: failed create empty wiki")
-		}
-	case err != nil:
-		return errors.WithMessagef(err, "check file %q", path)
-	case s.IsDir() || s.Name()[0] == '.':
-		// handle later by browse
-		return ErrNotFound
-	case !validateContentType(r, "text/html"):
-		// require text/html content type
+func (u *userHomeHandler) handleExistingFile(
+	ctx context.Context,
+	w http.ResponseWriter,
+	r *http.Request,
+	root *os.Root,
+	resolvedPath string,
+) error {
+	// require text/html content type
+	if !validateContentType(r, "text/html") {
 		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 
 		return nil
-	case r.Method == http.MethodPut && ishtml:
-		// no error, file exists, make backup on put
-		if err := u.b.create(ctx, root, u.user, path); err != nil {
-			return WithPublic(errors.WithMessage(err, "create backup"),
-				"Internal error: failed create backup")
+	}
+
+	// create backup on put
+	if r.Method == http.MethodPut && htmlRequested(r) {
+		if err := u.b.create(ctx, root, u.user, resolvedPath); err != nil {
+			return WithPublic(errors.WithMessage(err, "create backup"), "Internal error: failed create backup")
 		}
 	}
 
 	u.dav.ServeHTTP(w, r)
 
 	return nil
+}
+
+func htmlRequested(r *http.Request) bool {
+	ext := filepath.Ext(r.URL.Path)
+
+	return ext == ".html" || ext == ".htm"
 }
 
 // -------------------------------------------------------------------
