@@ -18,7 +18,6 @@ import (
 
 	slogctx "github.com/veqryn/slog-context"
 	"gitlab.com/tozd/go/errors"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/net/webdav"
 )
 
@@ -40,13 +39,11 @@ type userHomeHandler struct {
 	root *os.Root
 
 	user string
-	// pass is hashed user password.
-	pass string
 	home string
 	mu   sync.Mutex
 }
 
-func newUserHandler(user, pass, homedir string, backuper *Backuper) (*userHomeHandler, error) {
+func newUserHandler(user, homedir string, backuper *Backuper) (*userHomeHandler, error) {
 	slog.Debug("new user handler", "user", user, "homedir", homedir)
 
 	root, err := os.OpenRoot(homedir)
@@ -68,7 +65,6 @@ func newUserHandler(user, pass, homedir string, backuper *Backuper) (*userHomeHa
 	return &userHomeHandler{ //nolint:exhaustruct
 		b:    backuper,
 		user: user,
-		pass: pass,
 		home: homedir,
 		root: root,
 		dav:  dav,
@@ -124,10 +120,6 @@ func (u *userHomeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "server: handle browse error", "path", resolvedPath, "err", err)
 		renderError(w, http.StatusInternalServerError, err)
 	}
-}
-
-func (u *userHomeHandler) authenticate(pass string) bool {
-	return bcrypt.CompareHashAndPassword([]byte(u.pass), []byte(pass)) == nil
 }
 
 func (u *userHomeHandler) handleHTML(w http.ResponseWriter, r *http.Request, path string) error {
@@ -216,18 +208,12 @@ func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, pass, _ := r.BasicAuth()
-	switch h, ok := m.handlers[user]; {
-	case user == "":
-		// do no log initial, pre-auth errors
-	case !ok:
-		slog.InfoContext(r.Context(), "server: auth failed", "user", user, "reason", "unknown user")
-	case ok && h.authenticate(pass):
+	user := UserFromCtx(r.Context())
+
+	if h, ok := m.handlers[user]; ok {
 		h.ServeHTTP(w, r)
 
 		return
-	default:
-		slog.InfoContext(r.Context(), "server: auth failed", "user", user, "reason", "wrong password")
 	}
 
 	w.Header().Set("WWW-Authenticate", `Basic realm="widdlerex"`)
@@ -237,13 +223,14 @@ func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func newMultiUserHandler(basedir string, users map[string]string, backuper *Backuper) (*MultiUserHandler, error) {
 	handlers := make(map[string]*userHomeHandler, len(users))
 
-	for user, pass := range users {
+	for user := range users {
+		// TODO : move
 		homedir := filepath.Clean(path.Join(basedir, user))
 		if err := ensureDirExists(homedir); err != nil {
 			return nil, errors.WithMessagef(err, "ensure home %q for user %q", user, homedir)
 		}
 
-		h, err := newUserHandler(user, pass, homedir, backuper)
+		h, err := newUserHandler(user, homedir, backuper)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "prepare handler for user %q", user)
 		}
@@ -275,13 +262,17 @@ func newServer(cfg *Config, users map[string]string, backuper *Backuper) (*Serve
 	)
 
 	if cfg.Auth == AuthNone {
-		handler, err = newUserHandler("", "", cfg.WikisDir, backuper)
+		handler, err = newUserHandler("", cfg.WikisDir, backuper)
 	} else {
 		handler, err = newMultiUserHandler(cfg.WikisDir, users, backuper)
 	}
 
 	if err != nil {
 		return nil, errors.WithMessage(err, "prepare handler")
+	}
+
+	if cfg.Auth != AuthNone {
+		handler = &Authenticator{handler, users}
 	}
 
 	mux := http.NewServeMux()
