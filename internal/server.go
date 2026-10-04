@@ -222,7 +222,7 @@ func newServer(cfg *Config, users map[string]string, backuper *Backuper) *Server
 	mux := http.NewServeMux()
 	mux.Handle("/", handler)
 	mux.Handle("/favicon.ico", http.FileServerFS(staticFS))
-	mux.Handle("/_backups/", backuper)
+	mux.Handle("/_backups/", backuper.ServerRoutes())
 
 	var roothandler http.Handler = mux
 	if cfg.Auth != AuthNone {
@@ -338,7 +338,7 @@ func renderError(w http.ResponseWriter, status int, err error) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 
-	fmt.Fprintln(w, msg)
+	fmt.Fprintln(w, msg) //nolint:gosec,nolintlint
 
 	if !devmode || err == nil {
 		return
@@ -346,7 +346,7 @@ func renderError(w http.ResponseWriter, status int, err error) {
 
 	fmt.Fprint(w, "\n\n----------\n\n")
 
-	fmt.Fprintln(w, err.Error())
+	fmt.Fprintln(w, err.Error()) //nolint:gosec,nolintlint
 
 	for k, v := range errors.AllDetails(err) {
 		fmt.Fprintf(w, "    %s: %v\n", k, v)

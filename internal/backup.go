@@ -19,7 +19,7 @@ import (
 	"gitlab.com/tozd/go/errors"
 )
 
-const cleanTaskInterval = 3600 // sec
+const backupCleanTaskInterval = 3600 // sec
 
 // ---------------------------------------------------------------------------------
 
@@ -29,7 +29,7 @@ type BackupHandler interface {
 }
 
 type backupListHandler interface {
-	ListHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, root *os.Root, user string) bool
+	ServerRoutes() http.Handler
 }
 
 // ---------------------------------------------------------------------------------
@@ -46,8 +46,10 @@ type Backuper struct {
 
 func newBackuper(ctx context.Context, cfg *Config) (*Backuper, error) {
 	backuper := &Backuper{ //nolint:exhaustruct
-		cfg:        cfg,
-		backupsAge: make(map[string]time.Time),
+		cfg:                cfg,
+		backupsAge:         make(map[string]time.Time),
+		enabled:            false,
+		supportBackupsPage: false,
 	}
 
 	var err error
@@ -60,7 +62,7 @@ func newBackuper(ctx context.Context, cfg *Config) (*Backuper, error) {
 		}
 
 	case backupModeSqlite:
-		backuper.handler, err = newBackuperSqlite(ctx, cfg.BackupSqlite, cfg.BackupPolicy, cfg.BackupCompress)
+		backuper.handler, err = newBackuperSqlite(ctx, cfg)
 		if err != nil {
 			return backuper, errors.WithMessage(err, "prepare sqlite backup")
 		}
@@ -75,47 +77,43 @@ func newBackuper(ctx context.Context, cfg *Config) (*Backuper, error) {
 
 	slog.InfoContext(ctx, "backups: backup enabled", "backup_mode", cfg.BackupMode)
 
-	if _, ok := backuper.handler.(backupListHandler); ok {
-		backuper.supportBackupsPage = true
-	}
-
+	_, backuper.supportBackupsPage = backuper.handler.(backupListHandler)
 	backuper.enabled = true
 
 	return backuper, nil
 }
 
 func (b *Backuper) Run(ctx context.Context, users []string) error {
-	b.cleanWorker(ctx, users)
+	slog.DebugContext(ctx, "backups: clean old backups worker started", "users", users)
 
-	return nil
+	if len(users) == 0 {
+		users = []string{""}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.Tick(backupCleanTaskInterval * time.Second):
+			if err := b.handler.Clean(ctx, users); err != nil {
+				slog.ErrorContext(ctx, "backups: clean old backups failed", "err", err)
+			}
+		}
+	}
 }
 
-// ServeHTTP handle backup browse and restore.
-func (b *Backuper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (b *Backuper) ServerRoutes() http.Handler {
 	handler, ok := b.handler.(backupListHandler)
-	if !ok {
+	if ok {
+		return handler.ServerRoutes()
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/_backups/", func(w http.ResponseWriter, _ *http.Request) {
 		renderError(w, http.StatusNotImplemented, nil)
+	})
 
-		return
-	}
-
-	ctx := r.Context()
-	user := UserFromCtx(ctx)
-	home := b.cfg.userhome(user)
-
-	root, err := os.OpenRoot(home)
-	if err != nil {
-		slog.ErrorContext(ctx, "open homedir", "err", err)
-		renderError(w, http.StatusInternalServerError, err)
-
-		return
-	}
-
-	defer root.Close()
-
-	if !handler.ListHandler(ctx, w, r, root, user) {
-		renderError(w, http.StatusNotFound, nil)
-	}
+	return mux
 }
 
 // create backup of `srcFilePath` in `root`.
@@ -173,23 +171,4 @@ func (b *Backuper) needBackup(key string) bool {
 
 	// backup should be created
 	return true
-}
-
-func (b *Backuper) cleanWorker(ctx context.Context, users []string) {
-	slog.DebugContext(ctx, "backups: clean old backups worker started", "users", users)
-
-	if len(users) == 0 {
-		users = []string{""}
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.Tick(cleanTaskInterval * time.Second):
-			if err := b.handler.Clean(ctx, users); err != nil {
-				slog.ErrorContext(ctx, "backups: clean old backups failed", "err", err)
-			}
-		}
-	}
 }
