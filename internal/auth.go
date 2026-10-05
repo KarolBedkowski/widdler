@@ -32,7 +32,7 @@ func (a *Authenticator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// do no log initial, pre-auth errors
 	case !ok:
 		slog.InfoContext(r.Context(), "server: auth failed", "user", user, "reason", "unknown user")
-	case ok && a.authenticate(pass, userpass):
+	case a.authenticate(pass, userpass):
 		ctx := slogctx.Append(r.Context(), slog.String("user", user))
 		ctx = context.WithValue(ctx, UserCtxKey, user)
 		r = r.WithContext(ctx)

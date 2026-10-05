@@ -67,15 +67,9 @@ func (u *userHomeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	resolvedPath := filepath.Clean(filepath.Join(".", r.URL.Path))
+	resolvedPath := filepath.Join(".", r.URL.Path)
 	ctx := slogctx.Append(r.Context(), slog.String("path", resolvedPath))
 	slog.DebugContext(ctx, "server: resolved file")
-
-	if b := filepath.Base(resolvedPath); b[0] == '.' && b != "." {
-		renderError(w, http.StatusNotFound, nil)
-
-		return
-	}
 
 	r = r.WithContext(ctx)
 
@@ -122,7 +116,7 @@ func (u *userHomeHandler) handleNotExisting(
 	case !htmlRequested(r):
 		renderError(w, http.StatusNotFound, nil)
 
-	// ignore other methods
+	// accept only get method
 	case r.Method != http.MethodGet:
 		renderError(w, http.StatusNotFound, nil)
 
@@ -146,7 +140,7 @@ func (u *userHomeHandler) handleExistingFile(
 	root *os.Root,
 	resolvedPath string,
 ) error {
-	// require text/html content type
+	// require text/html content type for put/post methods
 	if !validateContentType(r, "text/html") {
 		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 
@@ -224,7 +218,7 @@ func newMultiUserHandler(basedir string, users map[string]string, backuper *Back
 	handlers := make(map[string]*userHomeHandler, len(users))
 
 	for user := range users {
-		handlers[user] = newUserHandler(user, filepath.Clean(path.Join(basedir, user)), backuper)
+		handlers[user] = newUserHandler(user, path.Join(basedir, user), backuper)
 	}
 
 	return &MultiUserHandler{handlers: handlers}
@@ -259,8 +253,12 @@ func newServer(cfg *Config, users map[string]string, backuper *Backuper) *Server
 		roothandler = &Authenticator{mux, users}
 	}
 
+	roothandler = http.NewCrossOriginProtection().Handler(roothandler)
+	roothandler = &Logger{roothandler}
+	roothandler = &secMiddleware{roothandler}
+
 	server.srv = &http.Server{ //nolint:exhaustruct
-		Handler:           &secMiddleware{&Logger{roothandler}},
+		Handler:           roothandler,
 		ReadHeaderTimeout: ServerHeaderTimeout,
 		ReadTimeout:       ServerReadTimeout,
 	}
@@ -342,11 +340,29 @@ type secMiddleware struct {
 
 func (s *secMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Block .htpasswd, Prevent directory traversal
-	if strings.Contains(r.URL.Path, ".htpasswd") || strings.Contains(r.URL.Path, "..") {
-		http.NotFound(w, r)
+	if strings.Contains(r.URL.Path, ".htpasswd") {
+		renderError(w, http.StatusNotFound, nil)
 
 		return
 	}
+
+	// do not accept path contains hidden files/dirs
+	if strings.Contains(r.URL.Path, "/.") {
+		renderError(w, http.StatusNotFound, nil)
+
+		return
+	}
+
+	h := w.Header()
+	h.Add("X-Frame-Options", "DENY")
+	h.Add("X-Content-Type-Options", "nosniff")
+	h.Add("Strict-Transport-Security", "max-age=31536000; preload")
+	h.Add("X-DNS-Prefetch-Control", "off")
+	h.Add("Cross-Origin-Embedder-Policy", "require-corp")
+	h.Add("Cross-Origin-Resource-Policy", "same-site")
+	h.Add("Permissions-Policy", "interest-cohort=()")
+	h.Add("Content-Security-Policy",
+		"frame-ancestors 'self'; img-src 'self'; object-src 'self'; base-uri 'self';")
 
 	s.next.ServeHTTP(w, r)
 }

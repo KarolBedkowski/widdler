@@ -276,7 +276,7 @@ func (b *BackuperSqlite) viewHandler(
 	}
 }
 
-func (b *BackuperSqlite) restoreHandler( //nolint:cyclop
+func (b *BackuperSqlite) restoreHandler(
 	ctx context.Context,
 	w http.ResponseWriter,
 	r *http.Request,
@@ -308,17 +308,11 @@ func (b *BackuperSqlite) restoreHandler( //nolint:cyclop
 		slog.ErrorContext(ctx, "sqlitebackup: invalid user", "backup.user", data.Username, "user", user)
 		renderError(w, http.StatusNotFound, nil)
 
-	case r.Method == http.MethodPost && !isValidFilename(fname):
-		http.Error(w, http.StatusText(http.StatusBadRequest)+" - invalid filename", http.StatusBadRequest)
-
 	case r.Method == http.MethodPost && fname != "":
 		slog.InfoContext(ctx, "restore backup file", "filename", fname, "backupid", backupid)
 
-		if err := b.restoreHandlerRestore(ctx, user, fname, data); err != nil {
+		if err := b.restoreHandlerRestore(ctx, w, user, fname, data); err != nil {
 			renderError(w, http.StatusInternalServerError, err)
-		} else {
-			w.Header().Set("Location", "/")
-			w.WriteHeader(http.StatusFound)
 		}
 	default:
 		WritePageTemplate(w, &SqlteBackupsRestorePage{data.Filename})
@@ -327,9 +321,16 @@ func (b *BackuperSqlite) restoreHandler( //nolint:cyclop
 
 func (b *BackuperSqlite) restoreHandlerRestore(
 	ctx context.Context,
+	w http.ResponseWriter,
 	user, fname string,
 	data *SqliteBackup,
 ) error {
+	if !isValidFilename(fname) {
+		http.Error(w, http.StatusText(http.StatusBadRequest)+" - invalid filename", http.StatusBadRequest)
+
+		return nil
+	}
+
 	root, err := os.OpenRoot(b.cfg.userhome(user))
 	if err != nil {
 		slog.ErrorContext(ctx, "open home failed", "backup.filename", data.Filename, "err", err)
@@ -344,6 +345,9 @@ func (b *BackuperSqlite) restoreHandlerRestore(
 
 		return errors.WithMessage(err, "write file")
 	}
+
+	w.Header().Set("Location", "/")
+	w.WriteHeader(http.StatusFound)
 
 	return nil
 }
@@ -401,13 +405,16 @@ func (b *BackuperSqlite) getUsersFiles(ctx context.Context) ([]UserFile, error) 
 	return usersfiles, nil
 }
 
-func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user, file string) error {
+func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user, file string) error { //nolint:dupl
 	var backupid sql.NullInt64
 
-	err := tx.QueryRowContext(ctx, "SELECT min(id) FROM ( "+
-		"SELECT id FROM backups WHERE username=? AND filename=? AND isfull=0 "+
-		"ORDER BY ts DESC LIMIT "+strconv.Itoa(b.numIncrBackups)+
-		")", user, file).Scan(&backupid)
+	query := `
+		SELECT min(id) FROM (
+			SELECT id FROM backups
+			WHERE username=? AND filename=? AND isfull=0
+			ORDER BY ts DESC LIMIT ` + strconv.Itoa(b.numIncrBackups) + ")"
+
+	err := tx.QueryRowContext(ctx, query, user, file).Scan(&backupid)
 	if errors.Is(err, sql.ErrNoRows) {
 		slog.DebugContext(ctx, "sqlitebackup: delete incr backups - not found")
 
@@ -418,7 +425,8 @@ func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user
 
 	slog.DebugContext(ctx, "sqlitebackup: delete incr backups", "min_id", backupid.Int64)
 
-	res, err := tx.ExecContext(ctx, "DELETE FROM backups WHERE username=? AND filename=? AND isfull=0 and id<?",
+	res, err := tx.ExecContext(ctx,
+		"DELETE FROM backups WHERE username=? AND filename=? AND isfull=0 and id<?",
 		user, file, backupid)
 	if err != nil {
 		return errors.WithMessagef(err, "clean incr backup for user %q file %q", user, file)
@@ -430,14 +438,17 @@ func (b *BackuperSqlite) deleteIncrBackups(ctx context.Context, tx *sql.Tx, user
 	return nil
 }
 
-func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user, file string) error {
+func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user, file string) error { //nolint:dupl
 	var backupid sql.NullInt64
 
-	err := tx.QueryRowContext(ctx, "SELECT min(id) FROM ( "+
-		"SELECT id FROM backups b WHERE username=? AND filename=? AND isfull=1 "+
-		" AND NOT EXISTS (SELECT NULL FROM backups b2 WHERE b2.parent = b.id) "+
-		"ORDER BY ts DESC LIMIT "+strconv.Itoa(b.numIncrBackups)+
-		")", user, file).Scan(&backupid)
+	query := `
+		SELECT min(id) FROM (
+			SELECT id FROM backups b
+			WHERE username=? AND filename=? AND isfull=1
+				AND NOT EXISTS (SELECT NULL FROM backups b2 WHERE b2.parent = b.id)
+			ORDER BY ts DESC LIMIT ` + strconv.Itoa(b.numIncrBackups) + ")"
+
+	err := tx.QueryRowContext(ctx, query, user, file).Scan(&backupid)
 	if errors.Is(err, sql.ErrNoRows) {
 		slog.DebugContext(ctx, "sqlitebackup: delete full backups - not found")
 
@@ -448,9 +459,10 @@ func (b *BackuperSqlite) deleteFullBackups(ctx context.Context, tx *sql.Tx, user
 
 	slog.DebugContext(ctx, "sqlitebackup: delete full backups", "min_id", backupid.Int64)
 
-	res, err := tx.ExecContext(ctx,
-		"DELETE FROM backups as b WHERE username=? AND filename=? AND isfull=1 and id < ? "+
-			" AND NOT EXISTS (SELECT NULL FROM backups b2 WHERE b2.parent = b.id) ",
+	res, err := tx.ExecContext(ctx, `
+		DELETE FROM backups as b
+		WHERE username=? AND filename=? AND isfull=1 and id < ?
+			AND NOT EXISTS (SELECT NULL FROM backups b2 WHERE b2.parent = b.id)`,
 		user, file, backupid)
 	if err != nil {
 		return errors.WithMessagef(err, "clean full backup for user %q file %q", user, file)
