@@ -138,6 +138,7 @@ func Main() { //nolint:funlen
 						Sources:   cli.EnvVars("WIDDLEREX_BACKUP_SQLITE_FILE"),
 						Validator: fileMustExistsValidator,
 					},
+					&cli.BoolFlag{Name: "offline", Value: false, Usage: "do not connect Internet when creating wikis"},
 				},
 				Action: serverCmd,
 			},

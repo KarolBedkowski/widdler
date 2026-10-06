@@ -37,12 +37,14 @@ type userHomeHandler struct {
 	b   *Backuper
 	dav *webdav.Handler
 
-	user string
-	home string
-	mu   sync.Mutex
+	user    string
+	home    string
+	offline bool
+
+	mu sync.Mutex
 }
 
-func newUserHandler(user, homedir string, backuper *Backuper) *userHomeHandler {
+func newUserHandler(user, homedir string, backuper *Backuper, offline bool) *userHomeHandler {
 	slog.Debug("new user handler", "user", user, "homedir", homedir)
 
 	dav := &webdav.Handler{ //nolint:exhaustruct
@@ -56,10 +58,11 @@ func newUserHandler(user, homedir string, backuper *Backuper) *userHomeHandler {
 	}
 
 	return &userHomeHandler{ //nolint:exhaustruct
-		b:    backuper,
-		user: user,
-		home: homedir,
-		dav:  dav,
+		b:       backuper,
+		user:    user,
+		home:    homedir,
+		offline: offline,
+		dav:     dav,
 	}
 }
 
@@ -112,6 +115,9 @@ func (u *userHomeHandler) handleNotExisting(
 	resolvedPath string,
 ) error {
 	switch {
+	case u.offline:
+		renderError(w, http.StatusNotFound, nil)
+
 	// ignore non html files
 	case !htmlRequested(r):
 		renderError(w, http.StatusNotFound, nil)
@@ -214,11 +220,11 @@ func (m *MultiUserHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func newMultiUserHandler(basedir string, users map[string]string, backuper *Backuper) *MultiUserHandler {
+func newMultiUserHandler(basedir string, users map[string]string, backuper *Backuper, offline bool) *MultiUserHandler {
 	handlers := make(map[string]*userHomeHandler, len(users))
 
 	for user := range users {
-		handlers[user] = newUserHandler(user, path.Join(basedir, user), backuper)
+		handlers[user] = newUserHandler(user, path.Join(basedir, user), backuper, offline)
 	}
 
 	return &MultiUserHandler{handlers: handlers}
@@ -238,9 +244,9 @@ func newServer(cfg *Config, users map[string]string, backuper *Backuper) *Server
 	var handler http.Handler
 
 	if cfg.Auth == AuthNone {
-		handler = newUserHandler("", cfg.WikisDir, backuper)
+		handler = newUserHandler("", cfg.WikisDir, backuper, cfg.Offline)
 	} else {
-		handler = newMultiUserHandler(cfg.WikisDir, users, backuper)
+		handler = newMultiUserHandler(cfg.WikisDir, users, backuper, cfg.Offline)
 	}
 
 	mux := http.NewServeMux()

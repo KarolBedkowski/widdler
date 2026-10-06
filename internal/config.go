@@ -35,6 +35,8 @@ type Config struct {
 	BackupCompress bool
 	BackupDir      string
 	BackupSqlite   string
+
+	Offline bool
 }
 
 func newConfigFromCmd(cmd *cli.Command) (*Config, error) {
@@ -65,6 +67,8 @@ func newConfigFromCmd(cmd *cli.Command) (*Config, error) {
 		BackupCompress: cmd.Bool("backup.compress"),
 		BackupDir:      cmd.String("backup.dir"),
 		BackupSqlite:   cmd.String("backup.sqlite_file"),
+
+		Offline: cmd.Bool("offline"),
 	}, nil
 }
 
