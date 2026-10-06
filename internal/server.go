@@ -365,17 +365,24 @@ func (s *secMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h := w.Header()
-	h.Add("X-Frame-Options", "DENY")
-	h.Add("X-Content-Type-Options", "nosniff")
-	h.Add("Strict-Transport-Security", "max-age=31536000; preload")
-	h.Add("X-DNS-Prefetch-Control", "off")
-	h.Add("Cross-Origin-Embedder-Policy", "require-corp")
-	h.Add("Cross-Origin-Resource-Policy", "same-site")
-	h.Add("Permissions-Policy", "interest-cohort=()")
-	h.Add("Content-Security-Policy",
-		"frame-ancestors 'self'; img-src 'self'; object-src 'self'; base-uri 'self';")
-	h.Add("Referrer-Policy", "same-origin")
+	headers := w.Header()
+	headers.Add("X-Frame-Options", "DENY")
+	headers.Add("X-Content-Type-Options", "nosniff")
+	headers.Add("Strict-Transport-Security", "max-age=31536000; preload")
+	headers.Add("X-DNS-Prefetch-Control", "off")
+	headers.Add("Cross-Origin-Embedder-Policy", "require-corp")
+	headers.Add("Cross-Origin-Resource-Policy", "same-site")
+	headers.Add("Permissions-Policy", "interest-cohort=()")
+	headers.Add("Content-Security-Policy",
+		"frame-ancestors 'self'; "+
+			"default-src 'self';"+
+			"img-src 'self'; "+
+			"object-src 'self'; "+
+			"base-uri 'self'; "+
+			"form-action 'self'; "+
+			"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
+			"style-src 'self' 'unsafe-inline'; ")
+	headers.Add("Referrer-Policy", "same-origin")
 
 	s.next.ServeHTTP(w, r)
 }
