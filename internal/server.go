@@ -375,6 +375,7 @@ func (s *secMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Add("Permissions-Policy", "interest-cohort=()")
 	h.Add("Content-Security-Policy",
 		"frame-ancestors 'self'; img-src 'self'; object-src 'self'; base-uri 'self';")
+	h.Add("Referrer-Policy", "same-origin")
 
 	s.next.ServeHTTP(w, r)
 }
