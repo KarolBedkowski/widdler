@@ -9,12 +9,14 @@ package internal
 
 import (
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gitlab.com/tozd/go/errors"
 )
@@ -62,6 +64,22 @@ func isValidFilename(name string) bool {
 		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 		"PRN", "AUX", "NUL",
 	}, name) {
+		return false
+	}
+
+	return true
+}
+
+func isValidPath(path string) bool {
+	if !fs.ValidPath(path) {
+		return false
+	}
+
+	if strings.ContainsAny(path, `\x00?*|"<>:\`) {
+		return false
+	}
+
+	if !utf8.ValidString(path) {
 		return false
 	}
 

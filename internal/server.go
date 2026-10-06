@@ -74,6 +74,12 @@ func (u *userHomeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := slogctx.Append(r.Context(), slog.String("path", resolvedPath))
 	slog.DebugContext(ctx, "server: resolved file")
 
+	if !isValidPath(resolvedPath) {
+		renderError(w, http.StatusBadRequest, nil)
+
+		return
+	}
+
 	r = r.WithContext(ctx)
 
 	root, err := os.OpenRoot(u.home)
