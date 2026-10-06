@@ -383,6 +383,7 @@ func (s *secMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
 			"style-src 'self' 'unsafe-inline'; ")
 	headers.Add("Referrer-Policy", "same-origin")
+	headers.Add("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
 
 	s.next.ServeHTTP(w, r)
 }
