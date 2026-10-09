@@ -101,12 +101,11 @@ func Main() { //nolint:funlen
 						Validator: argChoiceValidator("basic", "none", ""),
 					},
 					&cli.StringFlag{
-						Name:      "backup.dir",
-						Value:     "backups",
-						Usage:     "Directory for backups in user directory.",
-						Category:  CliCategoryBackup,
-						Sources:   cli.EnvVars("WIDDLEREX_BACKUP_DIR"),
-						Validator: dirMustExistsValidator,
+						Name:     "backup.dir",
+						Value:    "backups",
+						Usage:    "Directory for backups in user directory.",
+						Category: CliCategoryBackup,
+						Sources:  cli.EnvVars("WIDDLEREX_BACKUP_DIR"),
 					},
 					&cli.BoolFlag{Name: "backup.compress", Value: false, Usage: "compress backup with GZIP."},
 					&cli.StringFlag{
@@ -416,7 +415,7 @@ func dirMustExistsValidator(v string) error {
 
 	s, err := os.Stat(v)
 	if s == nil || errors.Is(err, os.ErrNotExist) {
-		return errors.New("file do not exists")
+		return errors.New("dir do not exists")
 	}
 
 	if !s.IsDir() {
