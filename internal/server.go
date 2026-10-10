@@ -152,13 +152,6 @@ func (u *userHomeHandler) handleExistingFile(
 	root *os.Root,
 	resolvedPath string,
 ) error {
-	// require text/html content type for put/post methods
-	if !validateContentType(r, "text/html") {
-		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
-
-		return nil
-	}
-
 	// create backup on put
 	if r.Method == http.MethodPut && htmlRequested(r) {
 		if err := u.b.create(ctx, root, u.user, resolvedPath); err != nil {

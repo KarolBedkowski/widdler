@@ -19,18 +19,26 @@ import (
 )
 
 func (u *userHomeHandler) handleBrowse(w http.ResponseWriter, r *http.Request, root *os.Root, reqpath string) error {
-	if r.Method == http.MethodPost {
+	switch {
+	case r.Method == http.MethodPost && validateContentType(r, "application/x-www-form-urlencoded"):
 		return u.handleNewFile(w, r, reqpath)
+
+	case r.Method == http.MethodPost:
+		u.dav.ServeHTTP(w, r)
+
+	case r.Method == http.MethodGet:
+		content, err := u.getDirContent(root, reqpath)
+		if err != nil {
+			return WithPublic(errors.WithMessage(err, "read dir content"), "Internal error: can read wikis directory")
+		}
+
+		w.Header().Add("Cache-Control", "no-cache")
+
+		WritePageTemplate(w, &ServerBrowserIndexPage{data: content})
+
+	default:
+		u.dav.ServeHTTP(w, r)
 	}
-
-	content, err := u.getDirContent(root, reqpath)
-	if err != nil {
-		return WithPublic(errors.WithMessage(err, "read dir content"), "Internal error: can read wikis directory")
-	}
-
-	w.Header().Add("Cache-Control", "no-cache")
-
-	WritePageTemplate(w, &ServerBrowserIndexPage{data: content})
 
 	return nil
 }
@@ -38,12 +46,6 @@ func (u *userHomeHandler) handleBrowse(w http.ResponseWriter, r *http.Request, r
 func (u *userHomeHandler) handleNewFile(w http.ResponseWriter, r *http.Request, reqpath string) error {
 	if u.offline {
 		renderError(w, http.StatusNotFound, nil)
-
-		return nil
-	}
-
-	if !validateContentType(r, "application/x-www-form-urlencoded") {
-		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 
 		return nil
 	}
