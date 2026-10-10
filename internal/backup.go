@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	slogctx "github.com/veqryn/slog-context"
 	"gitlab.com/tozd/go/errors"
 )
 
@@ -83,8 +82,10 @@ func newBackuper(ctx context.Context, cfg *Config) (*Backuper, error) {
 	return backuper, nil
 }
 
+// Run periodically remove old backups.
 func (b *Backuper) Run(ctx context.Context, users []string) error {
-	slog.DebugContext(ctx, "backups: clean old backups worker started", "users", users)
+	slog.DebugContext(ctx, "backups: clean old backups worker started", "users", users,
+		"interval", backupCleanTaskInterval)
 
 	if len(users) == 0 {
 		users = []string{""}
@@ -102,6 +103,7 @@ func (b *Backuper) Run(ctx context.Context, users []string) error {
 	}
 }
 
+// ServerRoutes return router for pages that provide browser/restore function for backups.
 func (b *Backuper) ServerRoutes() http.Handler {
 	handler, ok := b.handler.(backupListHandler)
 	if ok {
@@ -116,13 +118,11 @@ func (b *Backuper) ServerRoutes() http.Handler {
 	return mux
 }
 
-// create backup of `srcFilePath` in `root`.
+// create backup of `srcFilePath` file in `root`.
 func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath string) error {
 	if !b.enabled {
 		return nil
 	}
-
-	ctx = slogctx.Append(ctx, slog.String("file", srcFilePath))
 
 	if _, err := root.Stat(srcFilePath); err != nil {
 		if os.IsNotExist(err) {
