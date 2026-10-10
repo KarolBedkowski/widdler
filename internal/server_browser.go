@@ -36,6 +36,12 @@ func (u *userHomeHandler) handleBrowse(w http.ResponseWriter, r *http.Request, r
 }
 
 func (u *userHomeHandler) handleNewFile(w http.ResponseWriter, r *http.Request, reqpath string) error {
+	if u.offline {
+		renderError(w, http.StatusNotFound, nil)
+
+		return nil
+	}
+
 	if !validateContentType(r, "application/x-www-form-urlencoded") {
 		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 
@@ -101,6 +107,7 @@ func (u *userHomeHandler) getDirContent(root *os.Root, reqpath string) (*DirCont
 		Parent:            parent,
 		Path:              reqpath,
 		SupportBackupsDir: u.b.supportBackupsPage,
+		SupportCreateNew:  !u.offline,
 	}, nil
 }
 
@@ -110,4 +117,5 @@ type DirContent struct {
 	Parent            string
 	Path              string
 	SupportBackupsDir bool
+	SupportCreateNew  bool
 }

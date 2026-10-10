@@ -19,6 +19,7 @@ type ServerBrowserIndexPage struct {
 {% endif %}
 
 
+{% if p.data.SupportCreateNew %}
 <hr/>
 
 <h3>Create new, empty wiki</h3>
@@ -28,9 +29,11 @@ type ServerBrowserIndexPage struct {
 	<button type="submit">Create</button>
 </form>
 
-<hr/>
+
+{% endif %}
 
 {% if p.data.SupportBackupsDir %}
+<hr/>
 
 <h3>Backups</h3>
 <a href="/_backups/">Browse backuped files</a>
