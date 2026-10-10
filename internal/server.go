@@ -5,20 +5,14 @@ import (
 	"crypto/tls"
 	"embed"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"path"
-	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
-	slogctx "github.com/veqryn/slog-context"
 	"gitlab.com/tozd/go/errors"
-	"golang.org/x/net/webdav"
 )
 
 const emptyURL = "https://tiddlywiki.com/empty.html"
@@ -30,177 +24,6 @@ const (
 
 //go:embed *.ico
 var staticFS embed.FS
-
-// -------------------------------------------------------------------
-
-type userHomeHandler struct {
-	b   *Backuper
-	dav *webdav.Handler
-
-	user    string
-	home    string
-	offline bool
-
-	mu sync.Mutex
-}
-
-func newUserHandler(user, homedir string, backuper *Backuper, offline bool) *userHomeHandler {
-	slog.Debug("new user handler", "user", user, "homedir", homedir)
-
-	dav := &webdav.Handler{ //nolint:exhaustruct
-		LockSystem: webdav.NewMemLS(),
-		FileSystem: webdav.Dir(homedir),
-		Logger: func(r *http.Request, err error) {
-			if err != nil {
-				slog.ErrorContext(r.Context(), "server: handle error", "req", r.URL, "err", err)
-			}
-		},
-	}
-
-	return &userHomeHandler{ //nolint:exhaustruct
-		b:       backuper,
-		user:    user,
-		home:    homedir,
-		offline: offline,
-		dav:     dav,
-	}
-}
-
-func (u *userHomeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	resolvedPath := filepath.Join(".", r.URL.Path)
-	ctx := slogctx.Append(r.Context(), slog.String("path", resolvedPath))
-	slog.DebugContext(ctx, "server: resolved file")
-
-	if !isValidPath(resolvedPath) {
-		renderError(w, http.StatusBadRequest, nil)
-
-		return
-	}
-
-	r = r.WithContext(ctx)
-
-	root, err := os.OpenRoot(u.home)
-	if err != nil {
-		slog.ErrorContext(ctx, "server: open root error", "err", err)
-		renderError(w, http.StatusInternalServerError, err)
-
-		return
-	}
-	defer root.Close()
-
-	fileinfo, err := root.Stat(resolvedPath)
-	switch {
-	// handle not existing path
-	case os.IsNotExist(err):
-		err = u.handleNotExisting(ctx, w, r, root, resolvedPath)
-	// handle other stat errors
-	case err != nil || fileinfo == nil:
-		err = errors.WithMessagef(err, "stat %q", resolvedPath)
-	// handle existing dir -> browse
-	case fileinfo.IsDir():
-		err = u.handleBrowse(w, r, root, resolvedPath)
-	// handle existing files
-	default:
-		err = u.handleExistingFile(ctx, w, r, root, resolvedPath)
-	}
-
-	if err != nil {
-		slog.ErrorContext(ctx, "server: handler error", "err", err)
-		renderError(w, http.StatusInternalServerError, err)
-	}
-}
-
-func (u *userHomeHandler) handleNotExisting(
-	ctx context.Context,
-	w http.ResponseWriter,
-	r *http.Request,
-	root *os.Root,
-	resolvedPath string,
-) error {
-	switch {
-	case u.offline:
-		renderError(w, http.StatusNotFound, nil)
-
-	// ignore non html files
-	case !htmlRequested(r):
-		renderError(w, http.StatusNotFound, nil)
-
-	// accept only get method
-	case r.Method != http.MethodGet:
-		renderError(w, http.StatusNotFound, nil)
-
-	default:
-		// create empty wiki
-		if err := createEmptyWiki(ctx, root, resolvedPath); err != nil {
-			return WithPublic(errors.WithMessage(err, "create empty wiki"), "Internal error: failed create empty wiki")
-		}
-
-		// wiki created, serve
-		u.dav.ServeHTTP(w, r)
-	}
-
-	return nil
-}
-
-func (u *userHomeHandler) handleExistingFile(
-	ctx context.Context,
-	w http.ResponseWriter,
-	r *http.Request,
-	root *os.Root,
-	resolvedPath string,
-) error {
-	// create backup on put
-	if r.Method == http.MethodPut && htmlRequested(r) {
-		if err := u.b.create(ctx, root, u.user, resolvedPath); err != nil {
-			return WithPublic(errors.WithMessage(err, "create backup"), "Internal error: failed create backup")
-		}
-	}
-
-	u.dav.ServeHTTP(w, r)
-
-	return nil
-}
-
-func htmlRequested(r *http.Request) bool {
-	ext := filepath.Ext(r.URL.Path)
-
-	return ext == ".html" || ext == ".htm"
-}
-
-// -------------------------------------------------------------------
-
-func createEmptyWiki(ctx context.Context, root *os.Root, path string) error {
-	slog.InfoContext(ctx, "server: downloading", "url", emptyURL)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, emptyURL, http.NoBody)
-	if err != nil {
-		return errors.WithMessagef(err, "download %s", emptyURL)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp == nil {
-		return errors.WithMessagef(err, "download %s", emptyURL)
-	}
-
-	defer resp.Body.Close()
-
-	out, err := root.OpenFile(path, os.O_RDWR|os.O_CREATE, defaultFilePerm)
-	if err != nil {
-		return errors.WithMessage(err, "open output file")
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, resp.Body); err != nil {
-		return errors.WithMessage(err, "write")
-	}
-
-	slog.InfoContext(ctx, "server: create empty wiki completed")
-
-	return nil
-}
 
 // -------------------------------------------------------------------
 

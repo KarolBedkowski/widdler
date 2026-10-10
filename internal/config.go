@@ -133,3 +133,5 @@ const (
 	backupModeFile   = "file"
 	backupModeSqlite = "sqlite"
 )
+
+const DownloadWikiTimeoutSec = 60
