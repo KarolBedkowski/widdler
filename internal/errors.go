@@ -31,10 +31,16 @@ func (e withPublicError) Details() map[string]any {
 	return map[string]any{"public": e.msg}
 }
 
+// WithPublic create error with public message; if error already have this message - it's appended.
 func WithPublic(err error, msg string, args ...any) error {
+	emsg := fmt.Sprintf(msg, args...)
+	if p := Public(err); p != "" {
+		emsg += ": " + p
+	}
+
 	return withPublicError{
 		err: err,
-		msg: fmt.Sprintf(msg, args...),
+		msg: emsg,
 	}
 }
 
