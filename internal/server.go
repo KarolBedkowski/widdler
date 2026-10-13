@@ -186,18 +186,20 @@ func (s *secMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	headers.Add("X-Content-Type-Options", "nosniff")
 	headers.Add("Strict-Transport-Security", "max-age=31536000; preload")
 	headers.Add("X-DNS-Prefetch-Control", "off")
-	headers.Add("Cross-Origin-Embedder-Policy", "require-corp")
+	// break loading plugins
+	// headers.Add("Cross-Origin-Embedder-Policy", "require-corp")
 	headers.Add("Cross-Origin-Resource-Policy", "same-site")
 	headers.Add("Permissions-Policy", "interest-cohort=()")
 	headers.Add("Content-Security-Policy",
 		"frame-ancestors 'self'; "+
 			"default-src 'self';"+
-			"img-src 'self'; "+
+			"img-src 'self' http: https: data:; "+
 			"object-src 'self'; "+
 			"base-uri 'self'; "+
 			"form-action 'self'; "+
 			"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
-			"style-src 'self' 'unsafe-inline'; ")
+			"style-src 'self' 'unsafe-inline'; "+
+			"frame-src *;")
 	headers.Add("Referrer-Policy", "same-origin")
 	headers.Add("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
 	headers.Add("Cross-Origin-Resource-Policy", "same-site")
