@@ -270,6 +270,14 @@ func htmlRequested(r *http.Request) bool {
 // -------------------------------------------------------------------
 
 func createEmptyWiki(ctx context.Context, root *os.Root, path string) error {
+	// check if destination dir is valid
+	dstdir := filepath.Dir(path)
+	if s, err := root.Stat(dstdir); err != nil {
+		return WithPublic(errors.WithMessage(err, "stat dst dir"), "destination directory not exists")
+	} else if !s.IsDir() {
+		return WithPublic(errors.WithMessage(err, "stat dst dir"), "destination is not a directory")
+	}
+
 	slog.InfoContext(ctx, "server: downloading", "url", emptyURL)
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(DownloadWikiTimeoutSec)*time.Second)
