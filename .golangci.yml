@@ -12,8 +12,9 @@ linters:
     - testpackage
     - wsl
     - noinlineerr
-    - err113
-    - forbidigo
+    - gomodguard
+    - exhaustruct
+    - exhaustruct_v5
   settings:
     ireturn:
       allow:
@@ -83,9 +84,10 @@ formatters:
 
   settings:
     gofumpt:
-      # Choose whether to use the extra rules.
-      # Default: false
-      extra-rules: true
+      extra:
+        group-params: true
+        clothe-returns: true
+        balance-calls: true
     golines:
       # Target maximum line length.
       # Default: 100

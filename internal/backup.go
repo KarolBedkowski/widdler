@@ -9,22 +9,16 @@ package internal
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
-	"github.com/urfave/cli/v3"
-	slogctx "github.com/veqryn/slog-context"
+	"gitlab.com/tozd/go/errors"
 )
 
-const cleanTaskInterval = 3600 // sec
-
-const (
-	backupModeFile   = "file"
-	backupModeSqlite = "sqlite"
-)
+const backupCleanTaskInterval = 3600 // sec
 
 // ---------------------------------------------------------------------------------
 
@@ -34,7 +28,7 @@ type BackupHandler interface {
 }
 
 type backupListHandler interface {
-	ListHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, root *os.Root, user string) bool
+	ServerRoutes() http.Handler
 }
 
 // ---------------------------------------------------------------------------------
@@ -42,34 +36,34 @@ type backupListHandler interface {
 type Backuper struct {
 	handler            BackupHandler
 	backupsAge         map[string]time.Time
-	mode               string
-	interval           int
+	cfg                *Config
 	enabled            bool
 	supportBackupsPage bool
+
+	mu sync.RWMutex
 }
 
-func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
-	backuper := Backuper{ //nolint:exhaustruct
-		interval:   cmd.Int("backup.interval"),
-		mode:       cmd.String("backup.mode"),
-		backupsAge: make(map[string]time.Time),
+func newBackuper(ctx context.Context, cfg *Config) (*Backuper, error) {
+	backuper := &Backuper{ //nolint:exhaustruct
+		cfg:                cfg,
+		backupsAge:         make(map[string]time.Time),
+		enabled:            false,
+		supportBackupsPage: false,
 	}
 
 	var err error
 
-	switch backuper.mode {
+	switch cfg.BackupMode {
 	case backupModeFile:
-		backuper.handler, err = newBackuperFile(cmd.String("wikis"), cmd.String("backup.dir"),
-			cmd.String("backup.policy"), cmd.Bool("backup.compress"))
+		backuper.handler, err = newBackuperFile(cfg.WikisDir, cfg.BackupDir, cfg.BackupPolicy, cfg.BackupCompress)
 		if err != nil {
-			return backuper, fmt.Errorf("prepare file backup failed: %w", err)
+			return backuper, errors.WithMessage(err, "prepare file backup")
 		}
 
 	case backupModeSqlite:
-		backuper.handler, err = newBackuperSqlite(ctx, cmd.String("backup.sqlite_file"),
-			cmd.String("backup.policy"), cmd.Bool("backup.compress"))
+		backuper.handler, err = newBackuperSqlite(ctx, cfg)
 		if err != nil {
-			return backuper, fmt.Errorf("create sqlite backup failed: %w", err)
+			return backuper, errors.WithMessage(err, "prepare sqlite backup")
 		}
 
 	case "":
@@ -77,33 +71,58 @@ func newBackuper(ctx context.Context, cmd *cli.Command) (Backuper, error) {
 
 		return backuper, nil
 	default:
-		return backuper, fmt.Errorf("unknown backup mode %q", backuper.mode) //nolint:err113
+		return backuper, errors.Errorf("unknown backup mode %q", cfg.BackupMode)
 	}
 
-	slog.InfoContext(ctx, "backups: backup enabled", "backup_mode", backuper.mode)
+	slog.InfoContext(ctx, "backups: backup enabled", "backup_mode", cfg.BackupMode)
 
-	if _, ok := backuper.handler.(backupListHandler); ok {
-		backuper.supportBackupsPage = true
-	}
-
+	_, backuper.supportBackupsPage = backuper.handler.(backupListHandler)
 	backuper.enabled = true
 
 	return backuper, nil
 }
 
-func (b *Backuper) start(ctx context.Context, users []string) {
-	if b.enabled {
-		go b.cleanWorker(ctx, users)
+// Run periodically remove old backups.
+func (b *Backuper) Run(ctx context.Context, users []string) error {
+	slog.DebugContext(ctx, "backups: clean old backups worker started", "users", users,
+		"interval", backupCleanTaskInterval)
+
+	if len(users) == 0 {
+		users = []string{""}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.Tick(backupCleanTaskInterval * time.Second):
+			if err := b.handler.Clean(ctx, users); err != nil {
+				slog.ErrorContext(ctx, "backups: clean old backups failed", "err", err)
+			}
+		}
 	}
 }
 
-// create backup of `srcFilePath` in `root`.
+// ServerRoutes return router for pages that provide browser/restore function for backups.
+func (b *Backuper) ServerRoutes() http.Handler {
+	handler, ok := b.handler.(backupListHandler)
+	if ok {
+		return handler.ServerRoutes()
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/_backups/", func(w http.ResponseWriter, _ *http.Request) {
+		renderError(w, http.StatusNotImplemented, nil)
+	})
+
+	return mux
+}
+
+// create backup of `srcFilePath` file in `root`.
 func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath string) error {
 	if !b.enabled {
 		return nil
 	}
-
-	ctx = slogctx.Append(ctx, slog.String("file", srcFilePath))
 
 	if _, err := root.Stat(srcFilePath); err != nil {
 		if os.IsNotExist(err) {
@@ -112,27 +131,32 @@ func (b *Backuper) create(ctx context.Context, root *os.Root, user, srcFilePath 
 			return nil
 		}
 
-		return fmt.Errorf("stat file %q error: %w", srcFilePath, err)
+		return errors.WithMessage(err, "stat file")
 	}
 
 	filekey := user + "|" + root.Name() + "|" + srcFilePath
 
 	// check is need to create backup for given name; if interval=0 always create backup
-	if b.interval > 0 && !b.needBackup(filekey) {
+	if b.cfg.BackupInterval > 0 && !b.needBackup(filekey) {
 		return nil
 	}
 
 	if err := b.handler.Create(ctx, root, user, srcFilePath); err != nil {
-		return fmt.Errorf("create backup failed: %w", err)
+		return errors.WithMessage(err, "create backup")
 	}
 
 	// store backup time
+	b.mu.Lock()
 	b.backupsAge[filekey] = time.Now()
+	b.mu.Unlock()
 
 	return nil
 }
 
 func (b *Backuper) needBackup(key string) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
 	if oldBackupTs, ok := b.backupsAge[key]; ok {
 		// new day, always create backup
 		if now := time.Now(); oldBackupTs.YearDay() != now.YearDay() || now.Year() != oldBackupTs.Year() {
@@ -140,45 +164,11 @@ func (b *Backuper) needBackup(key string) bool {
 		}
 
 		// skip backup when oldbackup is not older that interval.
-		if time.Since(oldBackupTs) < time.Duration(b.interval)*time.Second {
+		if time.Since(oldBackupTs) < time.Duration(b.cfg.BackupInterval)*time.Second {
 			return false
 		}
 	}
 
 	// backup should be created
 	return true
-}
-
-func (b *Backuper) cleanWorker(ctx context.Context, users []string) {
-	slog.DebugContext(ctx, "backups: clean old backups worker started", "users", users)
-
-	if len(users) == 0 {
-		users = []string{""}
-	}
-
-	for c := time.Tick(cleanTaskInterval * time.Second); ; {
-		if err := b.handler.Clean(ctx, users); err != nil {
-			slog.ErrorContext(ctx, "backups: clean old backups failed", "err", err)
-		}
-
-		<-c
-	}
-}
-
-func (b *Backuper) handleBackupsPage(
-	ctx context.Context,
-	w http.ResponseWriter,
-	r *http.Request,
-	root *os.Root,
-	user string,
-) bool {
-	if !b.enabled {
-		return false
-	}
-
-	if bh, ok := b.handler.(backupListHandler); ok {
-		return bh.ListHandler(ctx, w, r, root, user)
-	}
-
-	return false
 }

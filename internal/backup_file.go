@@ -10,8 +10,8 @@ package internal
 import (
 	"compress/gzip"
 	"context"
-	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path"
@@ -24,6 +24,7 @@ import (
 	"time"
 
 	slogctx "github.com/veqryn/slog-context"
+	"gitlab.com/tozd/go/errors"
 )
 
 type BackuperFile struct {
@@ -45,24 +46,26 @@ func newBackuperFile(basedir, backupdir, policy string, compress bool) (*Backupe
 		keepDaily:   0,
 	}
 
-	if policy != "" {
-		if err := backuper.loadPolicy(policy); err != nil {
-			return nil, err
-		}
+	if err := backuper.loadPolicy(policy); err != nil {
+		return nil, errors.WithMessage(err, "load policy")
 	}
 
 	return backuper, nil
 }
 
+// Create backup of `srcFilePath` file in `root`.
+// Backup is created on the same dir as `srcFilePath` bt in sub directory configured by `backup.dir`.
 func (b *BackuperFile) Create(ctx context.Context, root *os.Root, user, srcFilePath string) error {
 	_ = user
 
+	filebackupdir := filepath.Join(filepath.Dir(srcFilePath), b.backupDir)
+
 	// create backup dir if not exists
-	if err := ensureBackupDirExists(ctx, root, b.backupDir); err != nil {
-		return err
+	if err := ensureDirExistsInRoot(root, filebackupdir); err != nil {
+		return errors.WithMessage(err, "ensure backup dir")
 	}
 
-	dstFilePath := filepath.Clean(path.Join(b.backupDir, srcFilePath))
+	dstFilePath := path.Join(filebackupdir, filepath.Base(srcFilePath))
 	// build backup file name - add postfix before extension
 	base, ext := splitNameExt(dstFilePath)
 	dstFilename := base + "--" + time.Now().Format("20060102_150405") + ext
@@ -72,13 +75,15 @@ func (b *BackuperFile) Create(ctx context.Context, root *os.Root, user, srcFileP
 
 func (b *BackuperFile) Clean(ctx context.Context, users []string) error {
 	for _, u := range users {
-		ud := path.Join(b.baseDir, u, b.backupDir)
 		lctx := slogctx.Append(ctx, slog.String("user", u))
 
-		slog.DebugContext(lctx, "filebackup: cleaning backup in "+ud)
+		root, err := os.OpenRoot(path.Join(b.baseDir, u))
+		if err != nil {
+			return errors.WithMessagef(err, "open root %q", root.Name())
+		}
 
-		if err := b.deleteOldBackups(lctx, ud); err != nil {
-			return fmt.Errorf("delete old backup %q error: %w", ud, err)
+		if err := b.deleteOldBackupR(lctx, root); err != nil {
+			return errors.WithMessagef(err, "delete old backup %q", root.Name())
 		}
 	}
 
@@ -94,14 +99,14 @@ func (b *BackuperFile) backupFile(ctx context.Context, root *os.Root, path, dstF
 		// already exists; skip
 		return nil
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("stat backup destination %q error: %w", dstFilename, err)
+		return errors.WithMessage(err, "stat backup destination")
 	}
 
 	slog.DebugContext(ctx, "filebackup: backup file", "src", path, "dst", dstFilename)
 
 	source, err := root.Open(path)
 	if err != nil {
-		return fmt.Errorf("open %q for backup error: %w", path, err)
+		return errors.WithMessage(err, "open file for backup")
 	}
 	defer closeFile(ctx, source, path)
 
@@ -109,7 +114,7 @@ func (b *BackuperFile) backupFile(ctx context.Context, root *os.Root, path, dstF
 
 	destination, err = root.Create(dstFilename)
 	if err != nil {
-		return fmt.Errorf("create backup file %q error: %w", dstFilename, err)
+		return errors.WithMessage(err, "create backup file")
 	}
 	defer closeFile(ctx, destination, dstFilename)
 
@@ -118,24 +123,61 @@ func (b *BackuperFile) backupFile(ctx context.Context, root *os.Root, path, dstF
 		defer closeFile(ctx, destination, "gzip")
 
 		if err != nil {
-			return fmt.Errorf("create gzip writer error: %w", err)
+			return errors.WithMessage(err, "create gzip writer")
 		}
 	}
 
 	if _, err = io.Copy(destination, source); err != nil {
-		return fmt.Errorf("create backup file error: %w", err)
+		return errors.WithMessage(err, "create backup")
+	}
+
+	return nil
+}
+
+func (b *BackuperFile) deleteOldBackupR(ctx context.Context, root *os.Root) error {
+	slog.DebugContext(ctx, "filebackup: deleteOldBackupsR", "path", root.Name())
+
+	rdfs, _ := root.FS().(fs.ReadDirFS)
+
+	entries, err := rdfs.ReadDir(".")
+	if err != nil {
+		return errors.WithMessage(err, "read dir")
+	}
+
+	for _, e := range entries {
+		name := e.Name()
+		switch {
+		case name == b.backupDir && e.IsDir():
+			path := filepath.Join(root.Name(), name)
+			if err := b.deleteOldBackups(ctx, path); err != nil {
+				return errors.WithMessagef(err, "deleteOldBackup %q", path)
+			}
+		case name[0] == '.':
+			// skip hidden
+		case e.IsDir():
+			sroot, err := root.OpenRoot(name)
+			if err != nil {
+				return errors.WithMessagef(err, "open dir %q in %q", name, root.Name())
+			}
+
+			if err := b.deleteOldBackupR(ctx, sroot); err != nil {
+				return errors.WithMessagef(err, "deleteOldBackupR %q", sroot.Name())
+			}
+		}
 	}
 
 	return nil
 }
 
 func (b *BackuperFile) deleteOldBackups(ctx context.Context, directory string) error {
+	slog.DebugContext(ctx, "filebackup: deleteOldBackups", "path", directory)
+
 	prefix := path.Join(directory, "*--*.htm*")
 
 	// find all files with prefix
 	allFiles, err := filepath.Glob(prefix)
 	if err != nil {
-		return fmt.Errorf("find old backups (%q) for delete error: %w", prefix, err)
+		return errors.WithMessagef(err, "find old backups (%q) for delete", prefix)
 	}
 
 	groups := groupFilesByPrefix(allFiles)
@@ -147,7 +189,7 @@ func (b *BackuperFile) deleteOldBackups(ctx context.Context, directory string) e
 			slog.DebugContext(ctx, "filebackup: delete old backup", "path", fname)
 
 			if err := os.Remove(fname); err != nil {
-				return fmt.Errorf("remove %q error: %w", fname, err)
+				return errors.WithMessage(err, "remove")
 			}
 		}
 	}
@@ -156,6 +198,10 @@ func (b *BackuperFile) deleteOldBackups(ctx context.Context, directory string) e
 }
 
 func (b *BackuperFile) loadPolicy(policy string) error {
+	if policy == "" {
+		return nil
+	}
+
 	fields := strings.Split(policy, ",")
 	if len(fields) == 0 {
 		return nil
@@ -165,13 +211,13 @@ func (b *BackuperFile) loadPolicy(policy string) error {
 
 	b.keepDaily, err = strconv.Atoi(fields[0])
 	if err != nil {
-		return fmt.Errorf("invalid policy value %q: %w", fields[0], err)
+		return errors.WithMessagef(err, "invalid policy value %q", fields[0])
 	}
 
 	if len(fields) > 1 {
 		b.keepOnWrite, err = strconv.Atoi(fields[1])
 		if err != nil {
-			return fmt.Errorf("invalid policy value %q: %w", fields[1], err)
+			return errors.WithMessagef(err, "invalid policy value %q", fields[1])
 		}
 	}
 
@@ -251,23 +297,6 @@ func splitNameExt(path string) (string, string) {
 	base := path[0 : len(path)-len(ext)]
 
 	return base, ext
-}
-
-func ensureBackupDirExists(ctx context.Context, root *os.Root, backupDir string) error {
-	const dirPerm = 0o700
-
-	// create backup dir if not exists
-	if _, err := root.Stat(backupDir); os.IsNotExist(err) {
-		if err := root.Mkdir(backupDir, dirPerm); err != nil {
-			return fmt.Errorf("create backup dir %q error: %w", backupDir, err)
-		}
-
-		slog.InfoContext(ctx, fmt.Sprintf("filebackup: created backup dir %s in %s", backupDir, root.Name()))
-	} else if err != nil {
-		return fmt.Errorf("stat backup dir %q error: %w", backupDir, err)
-	}
-
-	return nil
 }
 
 // closeFile close obj and log error.

@@ -1,18 +1,25 @@
 package internal
 
-import (
-	"fmt"
-	"slices"
-	"strings"
-	"time"
-)
-
 //
 // support.go
 // Copyright (C) 2025 Karol Będkowski <Karol Będkowski@kkomp>
 //
 // Distributed under terms of the GPLv3 license.
 //
+
+import (
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"gitlab.com/tozd/go/errors"
+)
 
 func formatDate(t time.Time) string { return t.Local().Format(time.DateTime) } //nolint:gosmopolitan
 
@@ -61,4 +68,71 @@ func isValidFilename(name string) bool {
 	}
 
 	return true
+}
+
+func isValidPath(path string) bool {
+	if !fs.ValidPath(path) {
+		return false
+	}
+
+	if strings.ContainsAny(path, `\x00?*|"<>:\`) {
+		return false
+	}
+
+	if !utf8.ValidString(path) {
+		return false
+	}
+
+	return true
+}
+
+func validateContentType(r *http.Request, contentType ...string) bool {
+	if r.ContentLength == 0 {
+		return true
+	}
+
+	ct := strings.Split(r.Header.Get("Content-Type"), ";")
+	if len(ct) == 0 || ct[0] == "" {
+		return false
+	}
+
+	return slices.Contains(contentType, ct[0])
+}
+
+// -------------------------------------------------------------------
+
+func ensureDirExists(dir string) error {
+	s, err := os.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		slog.Info("creating directory", "dir", dir)
+
+		if err := os.Mkdir(dir, defaultDirPerm); err != nil {
+			return errors.WithMessage(err, "create dir")
+		}
+	case err != nil:
+		return errors.WithMessage(err, "stat dir")
+	case !s.IsDir():
+		return errors.New("exists but is not directory")
+	}
+
+	return nil
+}
+
+func ensureDirExistsInRoot(root *os.Root, dir string) error {
+	s, err := root.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		slog.Info("creating directory", "dir", dir)
+
+		if err := root.Mkdir(dir, defaultDirPerm); err != nil {
+			return errors.WithMessage(err, "create dir")
+		}
+	case err != nil:
+		return errors.WithMessage(err, "stat dir")
+	case !s.IsDir():
+		return errors.New("exists but is not directory")
+	}
+
+	return nil
 }

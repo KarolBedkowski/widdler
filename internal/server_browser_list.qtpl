@@ -12,14 +12,14 @@ type ServerBrowserIndexPage struct {
 
 <h2>Files</h2>
 
+{%= p.renderTable() %}
+
 {% if len(p.data.Dirs) == 0 && len(p.data.Files) == 0 %}
 <p><en>No files found; pleace create new.</em></p>
-{% else %}
-
-{%= p.renderTable() %}
 {% endif %}
 
 
+{% if p.data.SupportCreateNew %}
 <hr/>
 
 <h3>Create new, empty wiki</h3>
@@ -29,12 +29,14 @@ type ServerBrowserIndexPage struct {
 	<button type="submit">Create</button>
 </form>
 
-<hr/>
+
+{% endif %}
 
 {% if p.data.SupportBackupsDir %}
+<hr/>
 
 <h3>Backups</h3>
-<a href="/_backups">Browse backuped files</a>
+<a href="/_backups/">Browse backuped files</a>
 
 {% endif %}
 
@@ -48,7 +50,7 @@ type ServerBrowserIndexPage struct {
 		<tr><th>Name</th><th>Date</th><th>Size</th></tr>
 	</thead>
 	<tbody>
-{% if p.data.Path != "" %}
+{% if p.data.Parent != "" %}
 	<tr><td><a href="{%s p.data.Parent %}">◀️ Go up...</a><br/></td></tr>
 {% endif %}
 
